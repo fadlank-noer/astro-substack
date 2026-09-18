@@ -1,1 +1,1 @@
-Substack Fetcher and Wrap it to MDX
+./packages/astro-substack/README.md

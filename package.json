@@ -1,20 +1,37 @@
 {
-  "name": "astro-su",
+  "name": "root",
+  "private": true,
+  "version": "0.0.0",
   "type": "module",
-  "version": "0.0.1",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/fadlank-noer/astro-substack.git"
+  },
+  "license": "MIT",
+  "author": {
+    "name": "Fadlan Noer",
+    "email": "fadlank.noer@gmail.com",
+    "url": "https://fadlank.web.id"
+  },
+  "bugs": {
+    "url": "https://github.com/fadlank-noer/astro-substack/issues"
+  },
+  "homepage": "https://github.com/fadlank-noer/astro-substack#readme",
+  "scripts": {
+    "dev": "pnpm --filter test-pkg dev",
+    "build": "pnpm --filter test-pkg build",
+    "test": "pnpm --filter test-pkg astro build"
+  },
+  "volta": {
+    "node": "22.12.0",
+    "pnpm": "11.13.1"
+  },
   "engines": {
     "node": ">=22.12.0"
   },
-  "scripts": {
-    "dev": "astro dev",
-    "build": "astro build",
-    "preview": "astro preview",
-    "astro": "astro"
-  },
+  "packageManager": "pnpm@11.13.1",
   "dependencies": {
-    "astro": "^7.3.2"
-  },
-  "allowScripts": {
-    "esbuild": true
+    "@changesets/cli": "^2.27.1",
+    "@changesets/changelog-github": "^0.5.0"
   }
 }

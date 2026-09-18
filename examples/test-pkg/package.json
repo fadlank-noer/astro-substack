@@ -1,0 +1,20 @@
+{
+  "name": "test-pkg",
+  "type": "module",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "dev": "astro dev",
+    "start": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "astro": "astro"
+  },
+  "volta": {
+    "extends": "../../package.json"
+  },
+  "dependencies": {
+    "astro": "^7.3.3",
+    "astro-substack": "workspace:*"
+  }
+}

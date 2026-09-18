@@ -1,0 +1,37 @@
+{
+  "name": "astro-substack",
+  "description": "Astro integration for Substack newsletter content.",
+  "version": "0.1.0",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/fadlank-noer/astro-substack.git"
+  },
+  "license": "MIT",
+  "author": {
+    "name": "Fadlan Noer",
+    "email": "fadlank.noer@gmail.com",
+    "url": "https://fadlank.web.id"
+  },
+  "bugs": {
+    "url": "https://github.com/fadlank-noer/astro-substack/issues"
+  },
+  "homepage": "https://github.com/fadlank-noer/astro-substack#readme",
+  "files": [
+    "lib",
+    "index.ts"
+  ],
+  "types": "./index.ts",
+  "exports": {
+    ".": "./index.ts",
+    "./lib/*": "./lib/*",
+    "./package.json": "./package.json"
+  },
+  "keywords": ["astro", "substack", "integration", "newsletter"],
+  "peerDependencies": {
+    "astro": "^4.0.0 || ^5.0.0 || ^6.0.0 || ^7.0.0"
+  },
+  "volta": {
+    "extends": "../../package.json"
+  }
+}
