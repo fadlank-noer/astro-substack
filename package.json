@@ -20,7 +20,8 @@
   "scripts": {
     "dev": "pnpm --filter test-pkg dev",
     "build": "pnpm --filter test-pkg build",
-    "test": "pnpm --filter test-pkg astro build"
+    "test": "pnpm --filter test-pkg astro build",
+    "test:unit": "pnpm --filter astro-substack test"
   },
   "volta": {
     "node": "22.12.0",

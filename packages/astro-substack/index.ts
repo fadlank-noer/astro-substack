@@ -1,2 +1,2 @@
 export { default as Hello } from "./lib/Hello.astro";
-export { substackLoader } from "./lib/substack.js";
+export { SubstackInitiator } from "./lib/substack/index.ts";

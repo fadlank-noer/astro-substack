@@ -1,7 +1,7 @@
 {
   "name": "astro-substack",
   "description": "Astro integration for Substack newsletter content.",
-  "version": "0.1.0",
+  "version": "0.1.1-beta",
   "type": "module",
   "repository": {
     "type": "git",
@@ -28,6 +28,9 @@
     "./package.json": "./package.json"
   },
   "keywords": ["astro", "substack", "integration", "newsletter"],
+  "scripts": {
+    "test": "node --test"
+  },
   "peerDependencies": {
     "astro": "^4.0.0 || ^5.0.0 || ^6.0.0 || ^7.0.0"
   },

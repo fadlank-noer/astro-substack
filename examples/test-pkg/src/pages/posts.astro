@@ -1,0 +1,37 @@
+---
+import { SubstackInitiator } from 'astro-substack';
+
+const client = new SubstackInitiator('https://fadlansthought.substack.com/');
+const posts = await client.fetchPublications();
+---
+
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width" />
+    <title>Posts — Test Pkg</title>
+  </head>
+  <body>
+    <h1>Publications</h1>
+    <p>{posts.length} post(s) fetched live from Substack at build time.</p>
+    {posts.map((post) => (
+      <article>
+        <h2>
+          <a href={post.canonicalUrl}>{post.title}</a>
+        </h2>
+        {post.subtitle && <p>{post.subtitle}</p>}
+        {post.coverImage && (
+          <img src={post.coverImage} alt={post.title} width="480" />
+        )}
+        <p>
+          <time datetime={post.postDate}>
+            {new Date(post.postDate).toLocaleDateString('en-US', { dateStyle: 'long' })}
+          </time>
+          {' '}· {post.type} · {post.audience}
+          {post.isPaywalled && <strong> — paywalled</strong>}
+        </p>
+      </article>
+      <hr />
+    ))}
+  </body>
+</html>
