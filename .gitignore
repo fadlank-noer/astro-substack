@@ -25,3 +25,6 @@ pnpm-debug.log*
 
 # Agent workspace (per-project .brain)
 .brain-project/
+
+# Substack static render output
+__substack_rendered/

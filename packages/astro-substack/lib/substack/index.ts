@@ -4,6 +4,8 @@
 export type SubstackSort = "new" | "top" | "pinned" | "community";
 
 import { errorMessage, mapPost, normalizeHandle } from "./helper.ts";
+import { join } from "node:path";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 
 /**
  * A public publication post as returned by `SubstackInitiator.fetchPublications()`.
@@ -19,7 +21,7 @@ export interface SubstackPublicationPost {
   slug: string;
   /** ISO 8601 publish timestamp, e.g. "2026-09-19T15:59:11.064Z". */
   postDate: string;
-  /** Canonical URL of the post on Substack. */
+  /** Canonical URL of the post. */
   canonicalUrl: string;
   /** Cover image URL, or null when the post has no cover. */
   coverImage: string | null;
@@ -43,6 +45,22 @@ export interface FetchPublicationsOptions {
   sort?: SubstackSort;
   /** Request timeout in milliseconds. Default: 15000. */
   timeoutMs?: number;
+}
+
+export interface StaticPostsMetadata {
+  /** Schema version — increment on breaking format changes. */
+  version: number;
+  /** ISO 8601 timestamp when posts were fetched. */
+  fetchedAt: string;
+  /** Sort order used: "new", "top", "pinned", or "community". */
+  sort: string;
+  /** Requested limit (null = all posts). */
+  limit: number | null;
+}
+
+export interface StaticPostsData {
+  meta: StaticPostsMetadata;
+  posts: SubstackPublicationPost[];
 }
 
 /**
@@ -115,5 +133,106 @@ export class SubstackInitiator {
     }
 
     return payload.map(mapPost);
+  }
+}
+
+/**
+ * Extended client for static builds that saves fetched posts to a local JSON file.
+ * Use this for prebuild scripts — call `save()` before reading with `load()`.
+ *
+ * @example
+ * ```typescript
+ * const client = new StaticSubstackInitiator("https://yourpub.substack.com/", "/path/to/project");
+ * await client.save({ limit: 20, sort: "new" });
+ * const { meta, posts } = await client.load();
+ * ```
+ */
+export class StaticSubstackInitiator extends SubstackInitiator {
+  private dirPath: string;
+
+  constructor(handle: string, dirPath: string) {
+    super(handle);
+    this.dirPath = dirPath;
+  }
+
+  /**
+   * Fetches publications and saves them to __substack_rendered/posts.json.
+   * Use this in prebuild scripts before static generation.
+   */
+  async saveStaticPosts(options: FetchPublicationsOptions = {}): Promise<void> {
+    const posts = await this.fetchPublications(options);
+    
+    const outputDir = join(this.dirPath, "__substack_rendered");
+    await mkdir(outputDir, { recursive: true });
+    
+    const payload = {
+      version: 1,
+      fetchedAt: new Date().toISOString(),
+      sort: options.sort ?? "new",
+      limit: options.limit ?? null,
+      posts,
+    };
+    
+    const outputPath = join(outputDir, "posts.json");
+    const encoder = new TextEncoder();
+    await writeFile(outputPath, encoder.encode(JSON.stringify(payload, null, 2)));
+  }
+
+  /**
+   * Loads statically-rendered posts from __substack_rendered/posts.json.
+   * Use this in Astro frontmatter for static pages.
+   */
+  async loadStaticPosts(): Promise<StaticPostsData> {
+    const postsPath = join(this.dirPath, "__substack_rendered", "posts.json");
+    
+    let raw: string;
+    try {
+      raw = await readFile(postsPath, { encoding: "utf-8" });
+    } catch (cause) {
+      throw new Error(
+        `Failed to read static posts from ${postsPath}: ${errorMessage(cause)}`,
+        { cause },
+      );
+    }
+    
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (cause) {
+      throw new Error(
+        `Malformed JSON in ${postsPath}: ${errorMessage(cause)}`,
+        { cause },
+      );
+    }
+    
+    if (
+      typeof parsed !== "object" ||
+      parsed === null ||
+      !("posts" in parsed) ||
+      !Array.isArray(parsed.posts)
+    ) {
+      throw new TypeError(
+        `Invalid static posts format in ${postsPath}: expected { version, fetchedAt, sort, limit, posts } structure`,
+      );
+    }
+    
+    const data = parsed as Record<string, unknown>;
+    
+    const version = typeof data.version === "number" ? data.version : 1;
+    if (version > 1) {
+      throw new TypeError(
+        `Unsupported static posts schema version: ${version}. Expected 1. Update astro-substack package.`,
+      );
+    }
+    
+    return {
+      meta: {
+        version,
+        fetchedAt: typeof data.fetchedAt === "string" ? data.fetchedAt : "",
+        sort: typeof data.sort === "string" ? data.sort : "new",
+        limit: data.limit !== undefined && data.limit !== null ? Number(data.limit) : null,
+      },
+      posts: Array.isArray(data.posts) ? data.posts : [],
+    };
   }
 }

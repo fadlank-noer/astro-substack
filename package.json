@@ -18,10 +18,12 @@
   },
   "homepage": "https://github.com/fadlank-noer/astro-substack#readme",
   "scripts": {
-    "dev": "pnpm --filter test-pkg dev",
-    "build": "pnpm --filter test-pkg build",
-    "test": "pnpm --filter test-pkg astro build",
-    "test:unit": "pnpm --filter astro-substack test"
+    "dev": "pnpm --filter ssr dev",
+    "build": "pnpm --filter ssr build",
+    "test": "pnpm --filter ssr astro build",
+    "test:unit": "pnpm --filter astro-substack test",
+    "dev:static": "pnpm --filter static-example dev",
+    "build:static": "pnpm --filter static-example build"
   },
   "volta": {
     "node": "22.12.0",
@@ -32,7 +34,11 @@
   },
   "packageManager": "pnpm@11.13.1",
   "dependencies": {
-    "@changesets/cli": "^2.27.1",
-    "@changesets/changelog-github": "^0.5.0"
+    "@changesets/changelog-github": "^0.5.0",
+    "@changesets/cli": "^2.27.1"
+  },
+  "devDependencies": {
+    "@astrojs/check": "^0.9.10",
+    "typescript": "^7.0.2"
   }
 }

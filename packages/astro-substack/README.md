@@ -1,5 +1,8 @@
 # Astro Substack
 
+> [!WARNING]
+> **Experimental Package** — This package is under active development and may contain breaking changes between versions. Use at your own discretion in production projects.
+
 Fetch public posts from any Substack publication and use them in Astro — at build time, with zero runtime dependencies.
 
 ## Install
@@ -87,6 +90,64 @@ const posts = await client.fetchPublications();
 
 > [!WARNING]
 > The Substack archive endpoint does **not** send `Access-Control-Allow-Origin`, so calling `fetchPublications()` from browser JavaScript on another domain will be blocked by CORS. Use it server-side (Astro frontmatter, endpoints, SSR) or behind a same-origin proxy.
+
+## Static Build Mode
+
+For static site generation, use `StaticSubstackInitiator` which extends `SubstackInitiator` with `save()` and `load()` methods.
+
+### Prebuild Script
+
+```javascript
+// scripts/prebuild.mjs
+import { StaticSubstackInitiator } from "astro-substack/lib/substack/index.ts";
+
+const client = new StaticSubstackInitiator("https://yourpub.substack.com/", process.cwd());
+await client.save({
+  limit: 20,
+  sort: "new",
+});
+```
+
+> **Note:** Import directly from source files to avoid `.astro` component loading issues in Node.js runtime.
+
+### package.json
+
+```json
+{
+  "scripts": {
+    "prebuild": "node scripts/prebuild.mjs",
+    "build": "astro build",
+    "dev": "node scripts/prebuild.mjs && astro dev"
+  }
+}
+```
+
+### Astro Page
+
+```astro
+---
+import { StaticSubstackInitiator } from "astro-substack";
+
+const client = new StaticSubstackInitiator("https://yourpub.substack.com/", process.cwd());
+const { meta, posts } = await client.load();
+
+---
+
+<ul>
+  {posts.map((post) => (
+    <li>
+      <a href={post.canonicalUrl}>{post.title}</a>
+      <time datetime={post.postDate}>{new Date(post.postDate).toDateString()}</time>
+    </li>
+  ))}
+</ul>
+```
+
+> **Note:** The `__substack_rendered/` directory is created in your project root by the prebuild script. Do not commit it to version control — add it to `.gitignore`.
+
+> **Schema Versioning:** The JSON format includes a `version` field. If you encounter "Unsupported static posts schema version" errors, update the `astro-substack` package.
+
+> **Design Note:** Persistence (saving to `__substack_rendered/`) is deliberately a separate function (`saveStaticPosts()`) rather than a flag on `SubstackInitiator`, so the core class remains browser-safe and environment-agnostic.
 
 ## Tests
 

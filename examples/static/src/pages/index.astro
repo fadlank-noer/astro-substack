@@ -1,0 +1,81 @@
+---
+import { StaticSubstackInitiator } from "astro-substack";
+import type { StaticPostsData } from "astro-substack";
+
+// Use process.cwd() — Astro dev/build always run with cwd = project root
+const projectRoot = process.cwd();
+
+const client = new StaticSubstackInitiator("https://fadlansthought.substack.com/", projectRoot);
+const { meta, posts }: StaticPostsData = await client.loadStaticPosts();
+---
+
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width" />
+    <title>Substack Static Example</title>
+  </head>
+  <body>
+    <h1>Substack Posts (Static Build)</h1>
+    
+    <section class="meta">
+      <p>Fetched at: {meta.fetchedAt}</p>
+      <p>Sort: {meta.sort}</p>
+      <p>Limit: {meta.limit ?? "all"}</p>
+      <p>Total posts: {posts.length}</p>
+    </section>
+    
+    <ul class="posts">
+      {posts.map((post) => (
+        <li>
+          <a href={post.canonicalUrl}>{post.title}</a>
+          <time datetime={post.postDate}>
+            {new Date(post.postDate).toLocaleDateString()}
+          </time>
+          {post.isPaywalled && <span class="paywall">🔒</span>}
+        </li>
+      ))}
+    </ul>
+    
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        max-width: 800px;
+        margin: 0 auto;
+        padding: 2rem;
+      }
+      .meta {
+        background: #f0f0f0;
+        padding: 1rem;
+        border-radius: 8px;
+        margin-bottom: 2rem;
+      }
+      .posts {
+        list-style: none;
+        padding: 0;
+      }
+      .posts li {
+        padding: 1rem;
+        border-bottom: 1px solid #eee;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+      .posts a {
+        text-decoration: none;
+        color: #333;
+        font-weight: 500;
+      }
+      .posts a:hover {
+        color: #0066cc;
+      }
+      time {
+        color: #666;
+        font-size: 0.9rem;
+      }
+      .paywall {
+        margin-left: 0.5rem;
+      }
+    </style>
+  </body>
+</html>

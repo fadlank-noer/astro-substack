@@ -1,0 +1,19 @@
+{
+  "name": "static-example",
+  "type": "module",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "dev": "node scripts/prebuild.mjs && astro dev",
+    "build": "node scripts/prebuild.mjs && astro build",
+    "prebuild": "node scripts/prebuild.mjs",
+    "preview": "astro preview"
+  },
+  "dependencies": {
+    "astro": "^7.3.3",
+    "astro-substack": "workspace:*"
+  },
+  "volta": {
+    "extends": "../../package.json"
+  }
+}

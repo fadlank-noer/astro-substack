@@ -1,7 +1,7 @@
 {
   "name": "astro-substack",
   "description": "Astro integration for Substack newsletter content.",
-  "version": "0.1.1-beta",
+  "version": "0.1.2-beta",
   "type": "module",
   "repository": {
     "type": "git",
@@ -27,7 +27,12 @@
     "./lib/*": "./lib/*",
     "./package.json": "./package.json"
   },
-  "keywords": ["astro", "substack", "integration", "newsletter"],
+  "keywords": [
+    "astro",
+    "substack",
+    "integration",
+    "newsletter"
+  ],
   "scripts": {
     "test": "node --test"
   },
@@ -36,5 +41,9 @@
   },
   "volta": {
     "extends": "../../package.json"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.4",
+    "typescript": "^7.0.2"
   }
 }
