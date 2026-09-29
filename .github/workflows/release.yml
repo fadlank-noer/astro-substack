@@ -1,7 +1,9 @@
 name: Release
 
 on:
-  push:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
     branches: [main]
 
 concurrency:
@@ -10,6 +12,8 @@ concurrency:
 
 jobs:
   release:
+    # only release when the CI workflow that just finished succeeded
+    if: github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -21,6 +25,7 @@ jobs:
           # full history: changeset publish creates and pushes git tags,
           # and changelog-github links changesets to commits
           fetch-depth: 0
+          ref: ${{ github.event.workflow_run.head_sha }}
 
       - uses: pnpm/action-setup@v4
 
