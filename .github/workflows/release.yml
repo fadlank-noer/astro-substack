@@ -1,0 +1,67 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # full history: changeset publish creates and pushes git tags,
+          # and changelog-github links changesets to commits
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Unit tests (release gate)
+        run: pnpm test:unit
+
+      - name: Build package
+        run: pnpm --filter astro-substack build
+
+      # No pending changesets  ->  `changeset publish` publishes every changed
+      #                          version to npm and tags the release.
+      # Pending changesets     ->  opens/updates a "Version Packages" PR instead;
+      #                          merging that PR lands back here and publishes.
+      - uses: changesets/action@v1
+        with:
+          publish: pnpm exec changeset publish
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      # changeset publish (above) pushed the `astro-substack@<version>` tag;
+      # turn that tag into a GitHub Release with the CHANGELOG section as notes.
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=$(node -p "require('./packages/astro-substack/package.json').version")
+          TAG="astro-substack@${VERSION}"
+          if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
+            sed -n "/^## ${VERSION}\$/,/^## /p" packages/astro-substack/CHANGELOG.md | sed '1d;$d' > release-notes.md
+            gh release create "$TAG" --title "astro-substack v${VERSION}" --notes-file release-notes.md
+          else
+            echo "Tag ${TAG} was not created (nothing published this run); skipping release."
+          fi
