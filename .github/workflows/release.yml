@@ -33,11 +33,11 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Unit tests (release gate)
-        run: pnpm test:unit
-
       - name: Build package
         run: pnpm --filter astro-substack build
+
+      - name: Unit tests (release gate)
+        run: pnpm test:unit
 
       # No pending changesets  ->  `changeset publish` publishes every changed
       #                          version to npm and tags the release.

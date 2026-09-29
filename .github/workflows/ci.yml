@@ -25,8 +25,8 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Unit tests (includes real-install smoke test)
-        run: pnpm test:unit
-
       - name: Build package
         run: pnpm --filter astro-substack build
+
+      - name: Unit tests (includes real-install smoke test)
+        run: pnpm test:unit
