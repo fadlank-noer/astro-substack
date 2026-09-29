@@ -1,20 +1,47 @@
-name: Release
+name: Pipeline
 
 on:
-  workflow_run:
-    workflows: [CI]
-    types: [completed]
+  push:
     branches: [main]
+  pull_request:
 
 concurrency:
-  group: release-${{ github.ref }}
-  cancel-in-progress: false
+  group: pipeline-${{ github.ref }}
+  # cancel superseded runs on PRs, but never kill a release mid-publish on main
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  release:
-    # only release when the CI workflow that just finished succeeded
-    if: github.event.workflow_run.conclusion == 'success'
+  ci:
+    name: "Step 1 — CI (test + build)"
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build package
+        run: pnpm --filter astro-substack build
+
+      - name: Unit tests (includes real-install smoke test)
+        run: pnpm test:unit
+
+  release:
+    name: "Step 2 — Release (publish npm + GitHub Release)"
+    needs: ci
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: write
       pull-requests: write
@@ -25,7 +52,6 @@ jobs:
           # full history: changeset publish creates and pushes git tags,
           # and changelog-github links changesets to commits
           fetch-depth: 0
-          ref: ${{ github.event.workflow_run.head_sha }}
 
       - uses: pnpm/action-setup@v4
 
@@ -41,18 +67,13 @@ jobs:
       - name: Build package
         run: pnpm --filter astro-substack build
 
-      - name: Unit tests (release gate)
-        run: pnpm test:unit
-
-      # No pending changesets  ->  `changeset publish` publishes every changed
-      #                          version to npm and tags the release.
-      # Pending changesets     ->  opens/updates a "Version Packages" PR instead;
-      #                          merging that PR lands back here and publishes.
       - name: Verify npm auth
         run: npm whoami
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
+      # Pending changesets  ->  opens/updates a "Version Packages" PR instead of publishing.
+      # No pending changesets ->  publishes every changed version to npm and pushes tags.
       # changesets 2.31.x masks pnpm publish errors behind
       # "TypeError: Cannot read properties of undefined (reading 'includes')";
       # the fallback publishes directly and surfaces the real registry error.
