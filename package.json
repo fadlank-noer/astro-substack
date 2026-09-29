@@ -23,7 +23,8 @@
     "test": "pnpm --filter ssr astro build",
     "test:unit": "pnpm --filter astro-substack test",
     "dev:static": "pnpm --filter static-example dev",
-    "build:static": "pnpm --filter static-example build"
+    "build:static": "pnpm --filter static-example build",
+    "publish:npm": "changeset publish || pnpm --filter astro-substack publish --no-git-checks --access public"
   },
   "volta": {
     "node": "22.12.0",

@@ -43,25 +43,37 @@ jobs:
       #                          version to npm and tags the release.
       # Pending changesets     ->  opens/updates a "Version Packages" PR instead;
       #                          merging that PR lands back here and publishes.
+      - name: Verify npm auth
+        run: npm whoami
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      # changesets 2.31.x masks pnpm publish errors behind
+      # "TypeError: Cannot read properties of undefined (reading 'includes')";
+      # the fallback publishes directly and surfaces the real registry error.
       - uses: changesets/action@v1
         with:
-          publish: pnpm exec changeset publish
+          publish: pnpm run publish:npm
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-      # changeset publish (above) pushed the `astro-substack@<version>` tag;
-      # turn that tag into a GitHub Release with the CHANGELOG section as notes.
+      # Publish from either path above must end up on npm before a release is
+      # cut; the tag may already exist (changeset publish pushes it) or is
+      # created here when the fallback path published.
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           VERSION=$(node -p "require('./packages/astro-substack/package.json').version")
           TAG="astro-substack@${VERSION}"
-          if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
+          if npm view "astro-substack@${VERSION}" version >/dev/null 2>&1; then
+            git tag "${TAG}" 2>/dev/null || true
+            git push origin "${TAG}" 2>/dev/null || true
             sed -n "/^## ${VERSION}\$/,/^## /p" packages/astro-substack/CHANGELOG.md | sed '1d;$d' > release-notes.md
-            gh release create "$TAG" --title "astro-substack v${VERSION}" --notes-file release-notes.md
+            gh release create "${TAG}" --title "astro-substack v${VERSION}" --notes-file release-notes.md \
+              || gh release edit "${TAG}" --notes-file release-notes.md
           else
-            echo "Tag ${TAG} was not created (nothing published this run); skipping release."
+            echo "astro-substack@${VERSION} not on npm; nothing to release this run."
           fi
