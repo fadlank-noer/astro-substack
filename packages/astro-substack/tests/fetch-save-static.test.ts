@@ -62,6 +62,7 @@ test("saveStaticPosts() writes posts.json with metadata", async () => {
     const data = JSON.parse(content);
     
     assert.equal(data.version, 1);
+    assert.equal(data.handle, PUBLICATION);
     assert.ok(data.fetchedAt, "fetchedAt should be present");
     assert.equal(data.sort, "top");
     assert.equal(data.limit, 10);
@@ -136,21 +137,51 @@ test("loadStaticPosts() reads valid posts.json", async () => {
     await import("node:fs/promises").then(({ writeFile }) =>
       writeFile(postsJson, JSON.stringify({
         version: 1,
+        handle: PUBLICATION,
         fetchedAt: "2026-09-22T10:00:00.000Z",
         sort: "new",
         limit: null,
         posts: [SAMPLE_POST]
       }, null, 2))
     );
-    
+
     const result = await client.loadStaticPosts();
-    
+
     assert.equal(result.meta.version, 1);
+    assert.equal(result.meta.handle, PUBLICATION);
     assert.equal(result.meta.fetchedAt, "2026-09-22T10:00:00.000Z");
     assert.equal(result.meta.sort, "new");
     assert.equal(result.meta.limit, null);
     assert.equal(result.posts.length, 1);
     assert.equal(result.posts[0].title, "Test Post");
+  } finally {
+    await rm(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("loadStaticPosts() defaults handle to empty for pre-handle posts.json", async () => {
+  const tmpDir = await mkdtemp(join(tmpdir(), "astro-substack-static-test-"));
+  const client = new StaticSubstackInitiator(PUBLICATION, tmpDir);
+
+  try {
+    const renderedDir = join(tmpDir, "__substack_rendered");
+    const { mkdir } = await import("node:fs/promises");
+    await mkdir(renderedDir, { recursive: true });
+    const postsJson = join(renderedDir, "posts.json");
+    await import("node:fs/promises").then(({ writeFile }) =>
+      writeFile(postsJson, JSON.stringify({
+        version: 1,
+        fetchedAt: "2026-09-22T10:00:00.000Z",
+        sort: "new",
+        limit: null,
+        posts: [SAMPLE_POST]
+      }, null, 2))
+    );
+
+    const result = await client.loadStaticPosts();
+
+    assert.equal(result.meta.version, 1, "old file must still load without a version bump");
+    assert.equal(result.meta.handle, "");
   } finally {
     await rm(tmpDir, { recursive: true, force: true });
   }

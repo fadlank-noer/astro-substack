@@ -50,6 +50,9 @@ export interface FetchPublicationsOptions {
 export interface StaticPostsMetadata {
   /** Schema version — increment on breaking format changes. */
   version: number;
+  /** Publication handle the posts were fetched from. Lets a page know the
+   *  source without reading env, which differs between Node and Vite. */
+  handle: string;
   /** ISO 8601 timestamp when posts were fetched. */
   fetchedAt: string;
   /** Sort order used: "new", "top", "pinned", or "community". */
@@ -75,7 +78,8 @@ export interface StaticPostsData {
  * logic here stays the same either way.
  */
 export class SubstackInitiator {
-  private handle: string; // example: "https://fadlansthought.substack.com/"
+  // protected: StaticSubstackInitiator persists the handle into posts.json meta.
+  protected handle: string; // example: "https://fadlansthought.substack.com/"
 
   constructor(handle: string) {
     this.handle = handle;
@@ -167,6 +171,7 @@ export class StaticSubstackInitiator extends SubstackInitiator {
     
     const payload = {
       version: 1,
+      handle: this.handle,
       fetchedAt: new Date().toISOString(),
       sort: options.sort ?? "new",
       limit: options.limit ?? null,
@@ -228,6 +233,7 @@ export class StaticSubstackInitiator extends SubstackInitiator {
     return {
       meta: {
         version,
+        handle: typeof data.handle === "string" ? data.handle : "",
         fetchedAt: typeof data.fetchedAt === "string" ? data.fetchedAt : "",
         sort: typeof data.sort === "string" ? data.sort : "new",
         limit: data.limit !== undefined && data.limit !== null ? Number(data.limit) : null,

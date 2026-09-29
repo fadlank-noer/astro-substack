@@ -93,22 +93,55 @@ const posts = await client.fetchPublications();
 
 ## Static Build Mode
 
-For static site generation, use `StaticSubstackInitiator` which extends `SubstackInitiator` with `save()` and `load()` methods.
+For static site generation, use `StaticSubstackInitiator`, which extends `SubstackInitiator`
+with `saveStaticPosts()` (fetch + persist) and `loadStaticPosts()` (read back at build time).
+
+The fastest way to start is the bundled CLI. It scaffolds an env-driven prebuild script in
+your project:
+
+```sh
+npx astro-substack init --publication https://yourpub.substack.com/
+```
+
+This creates `scripts/prebuild.mjs` and prints the `package.json` script block to paste. The
+generated script reads its configuration from the environment — never hardcoded. To replace
+an existing scaffold, re-run with `--force`.
+
+### Configuration (env)
+
+| Variable                   | Required | Meaning                                                                                          |
+| -------------------------- | -------- | ------------------------------------------------------------------------------------------------ |
+| `SUBSTACK_PUBLICATION_URL` | **yes**  | The publication to fetch. Missing → the script exits with an error (no silent fallback).          |
+| `SUBSTACK_LIMIT`           | no       | Posts per build, `1`-`50`. Out-of-range values warn and clamp to the server-side max of `50`.     |
+| `SUBSTACK_SORT`            | no       | `"new"` (default) \| `"top"` \| `"pinned"` \| `"community"`.                                      |
+
+Values come from the process environment, or from `.env` / `.env.local` via the zero-dependency
+loader inside the script (process env wins). `.env` is not needed by Astro itself — only by the
+prebuild.
 
 ### Prebuild Script
 
+`npx astro-substack init` generates this file; you can also copy it:
+
 ```javascript
 // scripts/prebuild.mjs
-import { StaticSubstackInitiator } from "astro-substack/lib/substack/index.ts";
+import { StaticSubstackInitiator } from "astro-substack";
 
-const client = new StaticSubstackInitiator("https://yourpub.substack.com/", process.cwd());
-await client.save({
-  limit: 20,
-  sort: "new",
+const handle = process.env.SUBSTACK_PUBLICATION_URL;
+if (!handle) {
+  console.error("SUBSTACK_PUBLICATION_URL is not set. Add it to .env.");
+  process.exit(1);
+}
+
+await new StaticSubstackInitiator(handle, process.cwd()).saveStaticPosts({
+  limit: process.env.SUBSTACK_LIMIT ? Number(process.env.SUBSTACK_LIMIT) : undefined,
+  sort: process.env.SUBSTACK_SORT || "new",
 });
 ```
 
-> **Note:** Import directly from source files to avoid `.astro` component loading issues in Node.js runtime.
+The full generated script also loads `.env` / `.env.local` and removes a stale
+`__substack_rendered/posts.json` before fetching, so a failed fetch can never leave the previous
+publication's posts behind for the build to silently pick up.
 
 ### package.json
 
@@ -116,23 +149,27 @@ await client.save({
 {
   "scripts": {
     "prebuild": "node scripts/prebuild.mjs",
-    "build": "astro build",
-    "dev": "node scripts/prebuild.mjs && astro dev"
+    "build": "npm run prebuild && astro build",
+    "dev": "npm run prebuild && astro dev"
   }
 }
 ```
 
 ### Astro Page
 
+The publication handle is written into `meta.handle` by the prebuild, so the page reads it from
+disk and needs **no env access** (`.astro` runs under Vite, where env resolution differs from
+plain Node):
+
 ```astro
 ---
 import { StaticSubstackInitiator } from "astro-substack";
 
-const client = new StaticSubstackInitiator("https://yourpub.substack.com/", process.cwd());
-const { meta, posts } = await client.load();
-
+const client = new StaticSubstackInitiator("unused-at-build-time", process.cwd());
+const { meta, posts } = await client.loadStaticPosts();
 ---
 
+<p>Publication: {meta.handle}</p>
 <ul>
   {posts.map((post) => (
     <li>
@@ -145,9 +182,18 @@ const { meta, posts } = await client.load();
 
 > **Note:** The `__substack_rendered/` directory is created in your project root by the prebuild script. Do not commit it to version control — add it to `.gitignore`.
 
-> **Schema Versioning:** The JSON format includes a `version` field. If you encounter "Unsupported static posts schema version" errors, update the `astro-substack` package.
+> **Schema Versioning:** The JSON format includes a `version` field (`meta.handle` is an
+> additive field and does not bump it). If you encounter "Unsupported static posts schema
+> version" errors, update the `astro-substack` package.
 
 > **Design Note:** Persistence (saving to `__substack_rendered/`) is deliberately a separate function (`saveStaticPosts()`) rather than a flag on `SubstackInitiator`, so the core class remains browser-safe and environment-agnostic.
+
+### Import paths
+
+- The package root is the single entry: `import { SubstackInitiator, StaticSubstackInitiator } from "astro-substack";`. The previous `astro-substack/lib/*` deep imports no longer exist.
+- The `Hello` component ships under the `astro-substack/astro` subpath: `import Hello from "astro-substack/astro";`. The root entry never resolves a `.astro` file.
+
+> **Known limitation:** the `astro-substack/astro` types ship as a global `declare module "*.astro"` wildcard, which can mask a genuinely missing `.astro` import in your own project.
 
 ## Tests
 

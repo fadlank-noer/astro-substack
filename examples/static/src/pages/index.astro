@@ -5,7 +5,10 @@ import type { StaticPostsData } from "astro-substack";
 // Use process.cwd() — Astro dev/build always run with cwd = project root
 const projectRoot = process.cwd();
 
-const client = new StaticSubstackInitiator("https://fadlansthought.substack.com/", projectRoot);
+// The publication is configured by scripts/prebuild.mjs, which writes it into
+// meta.handle. The page never reads env itself: import.meta.env only exists under
+// Vite, so a prebuild script and an .astro page cannot share one env mechanism.
+const client = new StaticSubstackInitiator("unused-at-build-time", projectRoot);
 const { meta, posts }: StaticPostsData = await client.loadStaticPosts();
 ---
 
@@ -19,6 +22,7 @@ const { meta, posts }: StaticPostsData = await client.loadStaticPosts();
     <h1>Substack Posts (Static Build)</h1>
     
     <section class="meta">
+      <p>Publication: {meta.handle}</p>
       <p>Fetched at: {meta.fetchedAt}</p>
       <p>Sort: {meta.sort}</p>
       <p>Limit: {meta.limit ?? "all"}</p>
