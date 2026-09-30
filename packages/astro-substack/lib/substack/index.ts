@@ -57,9 +57,10 @@ export interface FetchPublicationsOptions {
   proxyBaseUrl?: string;
   /**
    * Base delay between retries of retryable failures (HTTP 429/503 and
-   * network errors), multiplied by the attempt number: 5s, 10s by default.
-   * Substack rate-limits the shared proxy egress IPs, so a build that waits
-   * out a transient 429 succeeds instead of failing the whole deploy.
+   * network errors), multiplied by the attempt number: 10s, 20s, 30s, 40s by
+   * default (5 attempts, ~100s of total backoff). Substack rate-limits the
+   * shared proxy egress IPs, and those windows can outlast a few seconds —
+   * a build that waits them out succeeds instead of failing the whole deploy.
    */
   retryDelayMs?: number;
 }
@@ -143,8 +144,8 @@ export class SubstackInitiator {
       ? `${proxyBaseUrl}${proxyBaseUrl.includes("?") ? "&" : "?"}url=${encodeURIComponent(archiveUrl.toString())}`
       : archiveUrl;
 
-    const { retryDelayMs = 5_000 } = options;
-    const MAX_ATTEMPTS = 3;
+    const { retryDelayMs = 10_000 } = options;
+    const MAX_ATTEMPTS = 5;
 
     // 429/503 and network errors are retried with linear backoff (honoring
     // Retry-After when present): Substack rate-limits the shared proxy egress

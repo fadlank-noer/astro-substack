@@ -241,7 +241,7 @@ test("fetchPublications keeps failing after exhausting retries", async () => {
     },
   );
 
-  assert.equal(calls, 3);
+  assert.equal(calls, 5);
 });
 
 test("fetchPublications throws when the payload is not an array", async () => {

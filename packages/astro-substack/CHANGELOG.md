@@ -1,5 +1,11 @@
 # astro-substack
 
+## 0.2.1
+
+### Patch Changes
+
+- Strengthen the transient-failure retry: 5 attempts (was 3) with a 10s base delay (~100s of total backoff). Substack's rate-limit windows on shared proxy egress IPs can outlast a few seconds, so short backoffs still failed otherwise-green CI builds.
+
 ## 0.2.0
 
 ### Minor Changes
