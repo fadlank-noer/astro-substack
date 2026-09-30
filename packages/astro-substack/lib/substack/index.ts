@@ -67,6 +67,16 @@ export interface StaticPostsData {
 }
 
 /**
+ * Substack serves /api/v1/archive behind Cloudflare, which 403s non-browser
+ * clients when the request originates from a datacenter IP (seen 2026-09-30:
+ * GitHub Actions runners got "HTTP 403 Forbidden" while the same request from
+ * a residential IP passed). Sending a browser User-Agent satisfies the bot
+ * rule; Node's own default UA (or none) does not.
+ */
+const BROWSER_USER_AGENT =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36";
+
+/**
  * Minimal, dependency-free client for reading PUBLIC Substack publications.
  *
  * Designed for client-side SPAs: it only uses the global `fetch` API.
@@ -113,7 +123,10 @@ export class SubstackInitiator {
     let response: Response;
     try {
       response = await fetch(url, {
-        headers: { Accept: "application/json" },
+        headers: {
+          Accept: "application/json",
+          "User-Agent": BROWSER_USER_AGENT,
+        },
         signal: AbortSignal.timeout(timeoutMs),
       });
     } catch (cause) {
