@@ -47,6 +47,7 @@ const latest = await client.fetchPublications({
 | `limit`     | `number`                                            | —        | `1`-`50` (server-side max). **Omitted** = the `limit` param is not sent and Substack returns **all** posts. **Invalid** values (non-integer, `< 1`, `> 50`) fall back to `50`. |
 | `sort`      | `"new" \| "top" \| "pinned" \| "community"`         | `"new"`  | Archive sort order.                                                                                                                                       |
 | `timeoutMs` | `number`                                            | `15000`  | Request timeout via `AbortSignal.timeout`.                                                                                                                |
+| `proxyBaseUrl` | `string`                                         | —        | Route the request through a fetch proxy: `<proxyBaseUrl>?url=<encoded archive URL>`. Needed on datacenter IPs (GitHub Actions, most CI), where Substack's Cloudflare 403-challenges direct requests. See [CI / datacenter IPs](#ci--datacenter-ips). |
 
 #### Return shape
 
@@ -114,10 +115,31 @@ an existing scaffold, re-run with `--force`.
 | `SUBSTACK_PUBLICATION_URL` | **yes**  | The publication to fetch. Missing → the script exits with an error (no silent fallback).          |
 | `SUBSTACK_LIMIT`           | no       | Posts per build, `1`-`50`. Out-of-range values warn and clamp to the server-side max of `50`.     |
 | `SUBSTACK_SORT`            | no       | `"new"` (default) \| `"top"` \| `"pinned"` \| `"community"`.                                      |
+| `SUBSTACK_PROXY_URL`       | no       | Base URL of a fetch proxy for CI. See [CI / datacenter IPs](#ci--datacenter-ips).                 |
 
 Values come from the process environment, or from `.env` / `.env.local` via the zero-dependency
 loader inside the script (process env wins). `.env` is not needed by Astro itself — only by the
 prebuild.
+
+### CI / datacenter IPs
+
+Substack's Cloudflare 403-challenges requests from datacenter IPs — GitHub Actions runners, most
+CI — regardless of User-Agent, on both the archive endpoint and the RSS feed (verified 2026-09-30;
+the same requests pass from residential IPs). If your prebuild fails with
+`Substack archive returned HTTP 403`, route it through a fetch proxy: deploy the bundled
+Cloudflare Worker (`examples/worker-proxy`) and point `SUBSTACK_PROXY_URL` at it.
+
+```sh
+cd examples/worker-proxy && npx wrangler deploy
+# → https://astro-substack-archive-proxy.<your-subdomain>.workers.dev
+```
+
+```sh
+SUBSTACK_PROXY_URL=https://astro-substack-archive-proxy.<your-subdomain>.workers.dev
+```
+
+The worker only proxies `https://*.substack.com` URLs, so it is not an open proxy. Publications
+on custom domains are not proxied by the bundled worker.
 
 ### Prebuild Script
 

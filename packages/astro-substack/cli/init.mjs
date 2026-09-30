@@ -3,7 +3,7 @@
 // Plain ESM, zero dependencies: a .mjs bin is immune to Node's refusal to
 // type-strip .ts files under node_modules and runs on any Node version.
 
-import { mkdir, writeFile, access } from "node:fs/promises";
+import { mkdir, writeFile, access, realpath } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 
 const SORTS = ["new", "top", "pinned", "community"];
@@ -64,6 +64,11 @@ if (!handle) {
 const limit = process.env.SUBSTACK_LIMIT ? Number(process.env.SUBSTACK_LIMIT) : undefined;
 const sort = process.env.SUBSTACK_SORT || "new";
 
+// Optional: route the fetch through a proxy for environments where Substack's
+// Cloudflare 403-challenges direct requests (CI runners on datacenter IPs).
+// The bundled Cloudflare Worker proxy lives in examples/worker-proxy.
+const proxyBaseUrl = process.env.SUBSTACK_PROXY_URL || undefined;
+
 // Warn on values the library would silently coerce (EC5 / GRILLING C-2).
 if (limit !== undefined && (!Number.isInteger(limit) || limit < 1 || limit > 50)) {
   console.warn(
@@ -84,7 +89,11 @@ const { StaticSubstackInitiator } = await import("astro-substack");
 console.log(\`Fetching Substack posts for static build (\${handle}, sort=\${sort})...\`);
 
 try {
-  await new StaticSubstackInitiator(handle, projectRoot).saveStaticPosts({ limit, sort });
+  await new StaticSubstackInitiator(handle, projectRoot).saveStaticPosts({
+    limit,
+    sort,
+    proxyBaseUrl,
+  });
   console.log("✓ Static posts saved to __substack_rendered/posts.json");
 } catch (error) {
   console.error("✗ Failed to fetch static posts:", error.message);
@@ -97,13 +106,20 @@ const USAGE = `Usage: npx astro-substack init --publication <url> [options]
 Scaffold scripts/prebuild.mjs — an env-driven script that fetches your
 Substack posts into __substack_rendered/ before an Astro static build.
 
+Commands:
+  init                 Scaffold scripts/prebuild.mjs (optional; the bin only
+                       does this, so "init" is accepted but not required)
+  help                 Show this help
+
 Options:
   --publication <url>  Your Substack publication (required), e.g.
                        https://yourpub.substack.com/
   --limit <n>          Posts per build, 1-50 (Substack server-side max)
   --sort <value>       One of: new | top | pinned | community (default: new)
   --force              Overwrite an existing scripts/prebuild.mjs
-  --help               Show this help
+  -h, --help           Show this help
+
+Running without any arguments also shows this help.
 
 The script reads its configuration from the environment (.env / .env.local),
 so after scaffolding, add your publication to .env:
@@ -114,16 +130,20 @@ so after scaffolding, add your publication to .env:
 /**
  * Hand-rolled argv parsing — zero dependencies (C2).
  * Returns { args } on success or { error } on an unknown/missing-value token.
+ * Accepts the `init` / `help` subcommands so the documented invocation
+ * (`npx astro-substack init ...`) parses instead of failing as unknown.
  */
 export function parseArgs(argv) {
   const args = { force: false };
   const valueFlags = ["--publication", "--limit", "--sort"];
   for (let i = 0; i < argv.length; i++) {
     const flag = argv[i];
-    if (flag === "--help") {
+    if (flag === "--help" || flag === "-h" || flag === "help") {
       args.help = true;
     } else if (flag === "--force") {
       args.force = true;
+    } else if (flag === "init") {
+      // Optional subcommand; the bin has no other behavior.
     } else if (valueFlags.includes(flag)) {
       const value = argv[i + 1];
       if (value === undefined) return { error: `Missing value for ${flag}` };
@@ -137,6 +157,10 @@ export function parseArgs(argv) {
 }
 
 export async function main(argv = process.argv.slice(2)) {
+  if (argv.length === 0) {
+    console.log(USAGE);
+    return;
+  }
   const { args, error } = parseArgs(argv);
   if (error) {
     console.error(`${error}\n\n${USAGE}`);
@@ -200,10 +224,21 @@ export async function main(argv = process.argv.slice(2)) {
 }
 
 // Run only when executed directly, so tests can import parseArgs/TEMPLATE.
-const isEntry =
-  process.argv[1] !== undefined &&
-  import.meta.url === (await import("node:url")).pathToFileURL(resolve(process.argv[1])).href;
+// Also compare the resolved real path: npm/pnpm bin shims (notably on Windows)
+// may reach this file through a symlink, and then a raw argv[1] comparison
+// never matches — the bin would exit 0 without printing anything.
+async function isDirectRun() {
+  if (process.argv[1] === undefined) return false;
+  const { pathToFileURL } = await import("node:url");
+  const entry = resolve(process.argv[1]);
+  if (import.meta.url === pathToFileURL(entry).href) return true;
+  try {
+    return import.meta.url === pathToFileURL(await realpath(entry)).href;
+  } catch {
+    return false;
+  }
+}
 
-if (isEntry) {
+if (await isDirectRun()) {
   await main();
 }

@@ -239,3 +239,28 @@ test("handle without scheme is normalized to https", async () => {
 
   assert.equal(requested?.origin, "https://fadlansthought.substack.com");
 });
+
+test("fetchPublications routes through proxyBaseUrl when set", async () => {
+  let requested: URL | string | undefined;
+
+  await withFetchStub(
+    (url) => {
+      requested = url;
+      return Promise.resolve(jsonResponse([]));
+    },
+    async () => {
+      const client = new SubstackInitiator(PUBLICATION);
+      await client.fetchPublications({
+        limit: 10,
+        sort: "top",
+        proxyBaseUrl: "https://proxy.example.workers.dev",
+      });
+    },
+  );
+
+  const expected = "https://proxy.example.workers.dev?url=" +
+    encodeURIComponent(
+      `${PUBLICATION}api/v1/archive?sort=top&offset=0&limit=10`,
+    );
+  assert.equal(requested, expected);
+});

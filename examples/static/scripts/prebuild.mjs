@@ -51,6 +51,11 @@ if (!handle) {
 const limit = process.env.SUBSTACK_LIMIT ? Number(process.env.SUBSTACK_LIMIT) : undefined;
 const sort = process.env.SUBSTACK_SORT || "new";
 
+// Optional: route the fetch through a proxy for environments where Substack's
+// Cloudflare 403-challenges direct requests (CI runners on datacenter IPs).
+// The bundled Cloudflare Worker proxy lives in examples/worker-proxy.
+const proxyBaseUrl = process.env.SUBSTACK_PROXY_URL || undefined;
+
 // Warn on values the library would silently coerce (EC5 / GRILLING C-2).
 if (limit !== undefined && (!Number.isInteger(limit) || limit < 1 || limit > 50)) {
   console.warn(
@@ -71,7 +76,11 @@ const { StaticSubstackInitiator } = await import("astro-substack");
 console.log(`Fetching Substack posts for static build (${handle}, sort=${sort})...`);
 
 try {
-  await new StaticSubstackInitiator(handle, projectRoot).saveStaticPosts({ limit, sort });
+  await new StaticSubstackInitiator(handle, projectRoot).saveStaticPosts({
+    limit,
+    sort,
+    proxyBaseUrl,
+  });
   console.log("✓ Static posts saved to __substack_rendered/posts.json");
 } catch (error) {
   console.error("✗ Failed to fetch static posts:", error.message);

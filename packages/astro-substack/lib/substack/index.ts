@@ -45,6 +45,16 @@ export interface FetchPublicationsOptions {
   sort?: SubstackSort;
   /** Request timeout in milliseconds. Default: 15000. */
   timeoutMs?: number;
+  /**
+   * Base URL of a fetch proxy (see examples/worker-proxy) for environments
+   * where Substack's Cloudflare 403-challenges direct requests — GitHub
+   * Actions runners and other datacenter IPs (verified 2026-09-30: both the
+   * archive and the RSS feed are blocked there regardless of User-Agent,
+   * while the same requests pass from residential IPs). When set, the request
+   * goes to `<proxyBaseUrl>?url=<encoded archive URL>` and the proxy must
+   * return the upstream response verbatim.
+   */
+  proxyBaseUrl?: string;
 }
 
 export interface StaticPostsMetadata {
@@ -104,7 +114,7 @@ export class SubstackInitiator {
    * An invalid `limit` falls back to the server-side max of 50.
    */
   async fetchPublications(options: FetchPublicationsOptions = {}): Promise<SubstackPublicationPost[]> {
-    let { limit, sort = "new", timeoutMs = 15_000 } = options;
+    let { limit, sort = "new", timeoutMs = 15_000, proxyBaseUrl } = options;
 
     if (
       limit !== undefined &&
@@ -113,16 +123,22 @@ export class SubstackInitiator {
       limit = 50;
     }
 
-    const url = new URL("/api/v1/archive", normalizeHandle(this.handle));
-    url.searchParams.set("sort", sort);
-    url.searchParams.set("offset", "0");
+    const archiveUrl = new URL("/api/v1/archive", normalizeHandle(this.handle));
+    archiveUrl.searchParams.set("sort", sort);
+    archiveUrl.searchParams.set("offset", "0");
     if (limit !== undefined) {
-      url.searchParams.set("limit", String(limit));
+      archiveUrl.searchParams.set("limit", String(limit));
     }
+
+    // Through the proxy, the upstream URL travels as the `url` query param and
+    // the proxy returns the upstream response verbatim.
+    const requestUrl: URL | string = proxyBaseUrl
+      ? `${proxyBaseUrl}${proxyBaseUrl.includes("?") ? "&" : "?"}url=${encodeURIComponent(archiveUrl.toString())}`
+      : archiveUrl;
 
     let response: Response;
     try {
-      response = await fetch(url, {
+      response = await fetch(requestUrl, {
         headers: {
           Accept: "application/json",
           "User-Agent": BROWSER_USER_AGENT,
@@ -131,14 +147,14 @@ export class SubstackInitiator {
       });
     } catch (cause) {
       throw new Error(
-        `Failed to reach Substack archive at ${url}: ${errorMessage(cause)}`,
+        `Failed to reach Substack archive at ${archiveUrl}: ${errorMessage(cause)}`,
         { cause },
       );
     }
 
     if (!response.ok) {
       throw new Error(
-        `Substack archive returned HTTP ${response.status} ${response.statusText} for ${url}`,
+        `Substack archive returned HTTP ${response.status} ${response.statusText} for ${archiveUrl}`,
       );
     }
 
