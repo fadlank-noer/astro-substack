@@ -8,7 +8,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { SubstackInitiator } from "../lib/substack/index.ts";
+import { SubstackInitiator, type SubstackPublicationPost } from "../lib/substack/index.ts";
 
 const PUBLICATION = "https://fadlansthought.substack.com/";
 
@@ -193,9 +193,55 @@ test("fetchPublications throws a descriptive error on HTTP failure", async () =>
   await withFetchStub(
     () => Promise.resolve(jsonResponse({ error: "nope" }, 503)),
     async () => {
-      await assert.rejects(client.fetchPublications(), /HTTP 503/);
+      // 503 is retried; pin the backoff so the test stays fast.
+      await assert.rejects(
+        client.fetchPublications({ retryDelayMs: 1 }),
+        /HTTP 503/,
+      );
     },
   );
+});
+
+test("fetchPublications retries 429s and succeeds", async () => {
+  const client = new SubstackInitiator(PUBLICATION);
+  let calls = 0;
+  let posts: SubstackPublicationPost[] | undefined;
+
+  await withFetchStub(
+    () => {
+      calls++;
+      return Promise.resolve(
+        calls < 3 ? new Response("slow down", { status: 429 }) : jsonResponse([SAMPLE_POST]),
+      );
+    },
+    async () => {
+      posts = await client.fetchPublications({ retryDelayMs: 1 });
+    },
+  );
+
+  assert.equal(calls, 3);
+  assert.equal(posts?.length, 1);
+  assert.equal(posts?.[0].title, SAMPLE_POST.title);
+});
+
+test("fetchPublications keeps failing after exhausting retries", async () => {
+  const client = new SubstackInitiator(PUBLICATION);
+  let calls = 0;
+
+  await withFetchStub(
+    () => {
+      calls++;
+      return Promise.resolve(new Response("slow down", { status: 429 }));
+    },
+    async () => {
+      await assert.rejects(
+        client.fetchPublications({ retryDelayMs: 1 }),
+        /HTTP 429/,
+      );
+    },
+  );
+
+  assert.equal(calls, 3);
 });
 
 test("fetchPublications throws when the payload is not an array", async () => {
@@ -216,7 +262,7 @@ test("fetchPublications surfaces network failures with the target URL", async ()
     () => Promise.reject(new Error("ECONNREFUSED")),
     async () => {
       await assert.rejects(
-        client.fetchPublications(),
+        client.fetchPublications({ retryDelayMs: 1 }),
         /Failed to reach Substack archive.*ECONNREFUSED/s,
       );
     },

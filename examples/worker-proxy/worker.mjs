@@ -46,7 +46,9 @@ export default {
 
     const headers = new Headers();
     headers.set("Content-Type", upstream.headers.get("Content-Type") ?? "application/octet-stream");
-    headers.set("Cache-Control", "public, max-age=300");
+    // Never let the edge cache an upstream failure (a pinned 429 would outlive
+    // the rate-limit window it reports).
+    headers.set("Cache-Control", upstream.ok ? "public, max-age=300" : "no-store");
     headers.set("Access-Control-Allow-Origin", "*");
     return new Response(upstream.body, { status: upstream.status, headers });
   },

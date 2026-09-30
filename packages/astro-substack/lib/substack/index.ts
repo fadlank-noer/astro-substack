@@ -55,6 +55,13 @@ export interface FetchPublicationsOptions {
    * return the upstream response verbatim.
    */
   proxyBaseUrl?: string;
+  /**
+   * Base delay between retries of retryable failures (HTTP 429/503 and
+   * network errors), multiplied by the attempt number: 5s, 10s by default.
+   * Substack rate-limits the shared proxy egress IPs, so a build that waits
+   * out a transient 429 succeeds instead of failing the whole deploy.
+   */
+  retryDelayMs?: number;
 }
 
 export interface StaticPostsMetadata {
@@ -136,19 +143,41 @@ export class SubstackInitiator {
       ? `${proxyBaseUrl}${proxyBaseUrl.includes("?") ? "&" : "?"}url=${encodeURIComponent(archiveUrl.toString())}`
       : archiveUrl;
 
-    let response: Response;
-    try {
-      response = await fetch(requestUrl, {
-        headers: {
-          Accept: "application/json",
-          "User-Agent": BROWSER_USER_AGENT,
-        },
-        signal: AbortSignal.timeout(timeoutMs),
-      });
-    } catch (cause) {
+    const { retryDelayMs = 5_000 } = options;
+    const MAX_ATTEMPTS = 3;
+
+    // 429/503 and network errors are retried with linear backoff (honoring
+    // Retry-After when present): Substack rate-limits the shared proxy egress
+    // IPs, and a transient 429 must not fail an otherwise-green build.
+    let response: Response | undefined;
+    let lastCause: unknown;
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      try {
+        response = await fetch(requestUrl, {
+          headers: {
+            Accept: "application/json",
+            "User-Agent": BROWSER_USER_AGENT,
+          },
+          signal: AbortSignal.timeout(timeoutMs),
+        });
+      } catch (cause) {
+        lastCause = cause;
+      }
+      const retryable = !response || response.status === 429 || response.status === 503;
+      if (!retryable || attempt === MAX_ATTEMPTS) break;
+      const retryAfter = Number(response?.headers.get("Retry-After"));
+      const delayMs =
+        Number.isFinite(retryAfter) && retryAfter > 0
+          ? retryAfter * 1000
+          : retryDelayMs * attempt;
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+      response = undefined;
+    }
+
+    if (!response) {
       throw new Error(
-        `Failed to reach Substack archive at ${archiveUrl}: ${errorMessage(cause)}`,
-        { cause },
+        `Failed to reach Substack archive at ${archiveUrl}: ${errorMessage(lastCause)}`,
+        { cause: lastCause },
       );
     }
 

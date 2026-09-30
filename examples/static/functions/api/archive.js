@@ -31,13 +31,17 @@ export async function onRequestGet({ request }) {
       "User-Agent": USER_AGENT,
     },
     redirect: "follow",
-    // Posts change rarely; keep upstream hits low on the free tier.
-    cf: { cacheTtl: 300, cacheEverything: true },
+    // Cache successes at the edge (posts change rarely; keeps upstream hits
+    // low on the free tier) but never cache failures — a pinned 429 would
+    // outlive the rate-limit window it reports.
+    cf: { cacheEverything: true, cacheTtlByStatus: { "200-299": 300, "400-599": 0, "500-599": 0 } },
   });
 
   const headers = new Headers();
   headers.set("Content-Type", upstream.headers.get("Content-Type") ?? "application/octet-stream");
-  headers.set("Cache-Control", "public, max-age=300");
+  // Never let the edge cache an upstream failure (a pinned 429 would outlive
+  // the rate-limit window it reports).
+  headers.set("Cache-Control", upstream.ok ? "public, max-age=300" : "no-store");
   headers.set("Access-Control-Allow-Origin", "*");
   return new Response(upstream.body, { status: upstream.status, headers });
 }
