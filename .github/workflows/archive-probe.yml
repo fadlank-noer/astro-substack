@@ -1,7 +1,8 @@
-# One-off diagnostic: prove the archive-403 fix from a real GitHub Actions
-# runner (datacenter IP — the environment where the 403 was observed).
-# Probes /api/v1/archive with the pre-fix header set and the patched browser
-# User-Agent, then runs the live test through the actual client source.
+# One-off diagnostic: find a Substack fetch path that works from a GitHub
+# Actions runner (datacenter IP). The archive endpoint is behind Cloudflare,
+# which 403-challenges datacenter requests regardless of User-Agent (verified
+# 2026-09-30, run 36668783878). This probe also tries the RSS /feed, which RSS
+# readers must be able to fetch bot-wise, plus header variants.
 # Push to the ci/archive-probe branch to run it; safe to delete afterwards.
 name: Substack archive probe
 
@@ -20,44 +21,40 @@ jobs:
         with:
           node-version: 22
 
-      - name: Probe archive endpoint from runner IP
+      - name: Probe fetch paths from runner IP
         run: |
           node --input-type=module <<'EOF'
-          const url = "https://fadlansthought.substack.com/api/v1/archive?sort=new&offset=0&limit=10";
-
-          // Must match BROWSER_USER_AGENT in lib/substack/index.ts.
+          const base = "https://fadlansthought.substack.com";
           const UA =
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36";
 
-          // Gate is only the patched path: the pre-fix attempt is informational
-          // (Cloudflare rules may let it through sometimes — that is not a
-          // failure of this probe).
+          // Every attempt is informational; the gate is "at least one path
+          // that a CI prebuild could use returns 200".
           const attempts = [
-            ["pre-fix headers (Accept only)", { Accept: "application/json" }, false],
-            ["patched headers (browser User-Agent)", { Accept: "application/json", "User-Agent": UA }, true],
+            ["archive + Accept only", `${base}/api/v1/archive?sort=new&offset=0&limit=10`, { Accept: "application/json" }],
+            ["archive + browser UA", `${base}/api/v1/archive?sort=new&offset=0&limit=10`, { Accept: "application/json", "User-Agent": UA }],
+            ["feed + Accept only", `${base}/feed`, { Accept: "application/rss+xml, application/xml, text/xml, */*" }],
+            ["feed + browser UA", `${base}/feed`, { Accept: "application/rss+xml, application/xml, text/xml, */*", "User-Agent": UA }],
           ];
 
-          let patchedOk = false;
-          for (const [label, headers, isGate] of attempts) {
+          let anyOk = false;
+          for (const [label, url, headers] of attempts) {
             try {
               const res = await fetch(url, { headers, signal: AbortSignal.timeout(15000) });
-              const body = res.ok ? "" : ` — ${(await res.text()).slice(0, 120).replace(/\s+/g, " ")}`;
-              console.log(`${res.status} ${res.statusText}${body}  <- ${label}`);
-              if (isGate && res.ok) patchedOk = true;
+              const text = res.ok ? await res.text() : "";
+              const extra = res.ok
+                ? url.endsWith("/feed") ? ` — ${Number(text.match(/<item>/g)?.length ?? 0)} <item> entries` : " — JSON array"
+                : ` — ${text.slice(0, 100).replace(/\s+/g, " ")}`;
+              console.log(`${res.status} ${res.statusText}${extra}  <- ${label}`);
+              if (res.ok) anyOk = true;
             } catch (cause) {
               console.log(`network error: ${cause.message}  <- ${label}`);
             }
           }
 
-          if (!patchedOk) {
-            console.error("FAIL: patched browser-UA request did not succeed from this runner.");
+          if (!anyOk) {
+            console.error("FAIL: no fetch path succeeded from this runner.");
             process.exit(1);
           }
-          console.log("PASS: browser User-Agent fetch succeeded from the GitHub Actions runner.");
+          console.log("PASS: at least one path works from the GitHub Actions runner.");
           EOF
-
-      - name: Live test through the patched client
-        working-directory: packages/astro-substack
-        env:
-          SUBSTACK_LIVE_TEST: "1"
-        run: node --test tests/substack-live.test.ts
