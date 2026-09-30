@@ -78,6 +78,9 @@ jobs:
           echo "::error::proxy smoke test never returned a 200"
           exit 1
 
+      - name: Build workspace package (dist is gitignored)
+        run: pnpm --filter astro-substack build
+
       - name: Build static example (prebuild fetches through the proxy)
         env:
           SUBSTACK_PUBLICATION_URL: https://fadlansthought.substack.com/
