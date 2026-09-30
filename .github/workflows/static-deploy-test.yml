@@ -61,6 +61,10 @@ jobs:
 
       - name: Smoke-test proxy from runner (archive through Pages Function)
         run: |
+          echo "--- diagnostics: is the 429 edge-wide (cloud-IP block) or function-path-specific?"
+          echo "pages.dev root from runner: $(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "https://$PAGES_PROJECT.pages.dev")"
+          echo "r.jina.ai fallback from runner: $(curl -s -o /dev/null -w '%{http_code}' --max-time 40 "https://r.jina.ai/https://fadlansthought.substack.com/api/v1/archive?sort=new&offset=0&limit=10")"
+          echo "--- proxy attempts"
           ENCODED=$(node -e 'console.log(encodeURIComponent("https://fadlansthought.substack.com/api/v1/archive?sort=new&offset=0&limit=10"))')
           for i in 1 2 3 4 5; do
             if curl -fsS --max-time 30 "$PROXY_URL?url=$ENCODED" -o posts-smoke.json; then
