@@ -141,6 +141,12 @@ SUBSTACK_PROXY_URL=https://astro-substack-archive-proxy.<your-subdomain>.workers
 The worker only proxies `https://*.substack.com` URLs, so it is not an open proxy. Publications
 on custom domains are not proxied by the bundled worker.
 
+> **workers.dev caveat:** on the free plan, `*.workers.dev` is edge-rate-limited per client IP,
+> and shared CI runner IPs (GitHub Actions) routinely exhaust that budget — the same worker URL
+> returned 200 from a residential IP and an instant 429 from a runner (verified 2026-09-30).
+> For CI, prefer serving the proxy from a `pages.dev` Pages Function instead — see the
+> `functions/` directory in `examples/static`.
+
 ### Prebuild Script
 
 `npx astro-substack init` generates this file; you can also copy it:

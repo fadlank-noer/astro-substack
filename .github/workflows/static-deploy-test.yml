@@ -1,11 +1,12 @@
-# End-to-end static test on real infrastructure: deploys the bundled archive
-# proxy Worker, proves the Substack archive is reachable THROUGH it from a
-# GitHub Actions runner (direct fetches are 403-challenged there, see
-# archive-probe.yml), builds examples/static through the proxy, and deploys
-# the result to Cloudflare Pages as the astro-substack-static project.
+# End-to-end static test on real infrastructure. Direct fetches to Substack
+# are 403-challenged from GitHub Actions runner IPs (see archive-probe.yml),
+# and the workers.dev proxy gets edge-rate-limited (429) for those same IPs,
+# so the chain deploys the example — including its /api/archive Pages Function
+# proxy — to Cloudflare Pages first, then builds through that proxy and
+# redeploys the result as the production build of astro-substack-static.
 #
-# Requires repo secrets: CLOUDFLARE_API_TOKEN (Workers Scripts:Edit +
-# Cloudflare Pages:Edit), CLOUDFLARE_ACCOUNT_ID.
+# Requires repo secrets: CLOUDFLARE_API_TOKEN (Cloudflare Pages:Edit),
+# CLOUDFLARE_ACCOUNT_ID.
 #
 # Push to ci/archive-probe to run; safe to delete afterwards.
 name: Static deploy test (Cloudflare)
@@ -14,6 +15,11 @@ on:
   push:
     branches: [ci/archive-probe]
   workflow_dispatch:
+
+env:
+  PAGES_PROJECT: astro-substack-static
+  # The Pages Function in examples/static/functions/api/archive.js.
+  PROXY_URL: https://astro-substack-static.pages.dev/api/archive
 
 jobs:
   static-deploy-test:
@@ -31,26 +37,38 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Deploy archive proxy Worker
-        working-directory: examples/worker-proxy
+      - name: Ensure Cloudflare Pages project exists
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: |
-          npx wrangler@4 deploy 2>&1 | tee wrangler-deploy.log
-          PROXY_URL=$(grep -oE 'https://astro-substack-archive-proxy\.[a-z0-9-]+\.workers\.dev' wrangler-deploy.log | head -1 || true)
-          if [ -z "$PROXY_URL" ]; then
-            echo "::error::Could not parse the workers.dev URL from wrangler output"
-            exit 1
-          fi
-          echo "PROXY_URL=$PROXY_URL" >> "$GITHUB_ENV"
+        run: npx wrangler@4 pages project create "$PAGES_PROJECT" --production-branch=main || true
 
-      - name: Smoke-test proxy from runner (archive through Worker)
+      - name: Deploy static example with proxy function (bootstrap)
+        working-directory: examples/static
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        # --branch=main is explicit: this workflow runs on ci/archive-probe, and
+        # without it wrangler would infer the git branch and cut a preview
+        # deployment instead of filling the production astro-substack-static.pages.dev.
+        # The committed dist placeholder is fine: this pass publishes the
+        # /api/archive function; the fresh build follows below.
+        run: npx wrangler@4 pages deploy dist --project-name="$PAGES_PROJECT" --branch=main --commit-dirty=true
+
+      - name: Smoke-test proxy from runner (archive through Pages Function)
         run: |
           ENCODED=$(node -e 'console.log(encodeURIComponent("https://fadlansthought.substack.com/api/v1/archive?sort=new&offset=0&limit=10"))')
-          curl -fsS --max-time 30 "$PROXY_URL?url=$ENCODED" -o posts-smoke.json
-          node -e 'const d=require("./posts-smoke.json"); if(!Array.isArray(d)||d.length===0) throw new Error("unexpected payload"); console.log("proxy OK:", d.length, "posts through", process.env.PROXY_URL)'
-          rm posts-smoke.json
+          for i in 1 2 3 4 5; do
+            if curl -fsS --max-time 30 "$PROXY_URL?url=$ENCODED" -o posts-smoke.json; then
+              node -e 'const d=require("./posts-smoke.json"); if(!Array.isArray(d)||d.length===0) throw new Error("unexpected payload"); console.log("proxy OK:", d.length, "posts through", process.env.PROXY_URL)'
+              rm posts-smoke.json
+              exit 0
+            fi
+            echo "attempt $i failed (pages.dev propagation or upstream hiccup); retrying..."
+            sleep 10
+          done
+          echo "::error::proxy smoke test never returned a 200"
+          exit 1
 
       - name: Build static example (prebuild fetches through the proxy)
         env:
@@ -60,31 +78,23 @@ jobs:
           SUBSTACK_PROXY_URL: ${{ env.PROXY_URL }}
         run: pnpm --filter static-example build
 
-      - name: Ensure Cloudflare Pages project exists
+      - name: Deploy built static example to Cloudflare Pages
+        working-directory: examples/static
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: npx wrangler@4 pages project create astro-substack-static --production-branch=main || true
-
-      - name: Deploy static example to Cloudflare Pages
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        # --branch=main is explicit: this workflow runs on ci/archive-probe, and
-        # without it wrangler would infer the git branch and cut a preview
-        # deployment instead of filling the production astro-substack-static.pages.dev.
-        run: npx wrangler@4 pages deploy examples/static/dist --project-name=astro-substack-static --branch=main
+        run: npx wrangler@4 pages deploy dist --project-name="$PAGES_PROJECT" --branch=main --commit-dirty=true
 
       - name: Verify production URL is live
         run: |
           for i in 1 2 3 4 5; do
-            STATUS=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 https://astro-substack-static.pages.dev || true)
-            echo "attempt $i: astro-substack-static.pages.dev -> $STATUS"
+            STATUS=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "https://$PAGES_PROJECT.pages.dev" || true)
+            echo "attempt $i: $PAGES_PROJECT.pages.dev -> $STATUS"
             if [ "$STATUS" = "200" ]; then
-              echo "PASS: https://astro-substack-static.pages.dev is live"
+              echo "PASS: https://$PAGES_PROJECT.pages.dev is live"
               exit 0
             fi
             sleep 10
           done
-          echo "::error::astro-substack-static.pages.dev did not return 200"
+          echo "::error::$PAGES_PROJECT.pages.dev did not return 200"
           exit 1
