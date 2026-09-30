@@ -51,9 +51,13 @@ jobs:
         # --branch=main is explicit: this workflow runs on ci/archive-probe, and
         # without it wrangler would infer the git branch and cut a preview
         # deployment instead of filling the production astro-substack-static.pages.dev.
-        # The committed dist placeholder is fine: this pass publishes the
-        # /api/archive function; the fresh build follows below.
-        run: npx wrangler@4 pages deploy dist --project-name="$PAGES_PROJECT" --branch=main --commit-dirty=true
+        # dist is gitignored; this first pass only needs an asset dir to carry
+        # the /api/archive Pages Function into production — the real build is
+        # deployed in the step after the smoke test.
+        run: |
+          mkdir -p dist
+          printf '<!doctype html><title>astro-substack static example</title><p>bootstrap placeholder\n' > dist/index.html
+          npx wrangler@4 pages deploy dist --project-name="$PAGES_PROJECT" --branch=main --commit-dirty=true
 
       - name: Smoke-test proxy from runner (archive through Pages Function)
         run: |
