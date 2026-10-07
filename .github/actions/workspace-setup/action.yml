@@ -1,13 +1,10 @@
 name: "Workspace setup"
 description: >-
-  Checkout + pnpm + Node 22 + frozen install for this pnpm monorepo — the
-  shared "checkout" component every pipeline stage starts with.
+  pnpm + Node 22 + frozen install for this pnpm monorepo. Run actions/checkout
+  BEFORE this component — local composite actions are resolved from the
+  working directory, so the component itself cannot contain the checkout.
 
 inputs:
-  fetch-depth:
-    description: "Git fetch depth (npm release needs full history for tags)"
-    required: false
-    default: "1"
   registry-url:
     description: "npm registry to authenticate against (empty = none)"
     required: false
@@ -16,10 +13,6 @@ inputs:
 runs:
   using: "composite"
   steps:
-    - uses: actions/checkout@v4
-      with:
-        fetch-depth: ${{ inputs.fetch-depth }}
-
     - uses: pnpm/action-setup@v4
 
     - uses: actions/setup-node@v4

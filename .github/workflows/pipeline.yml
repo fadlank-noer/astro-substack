@@ -25,6 +25,10 @@ jobs:
     permissions:
       contents: read
     steps:
+      # Local composite actions are resolved from the working directory, so
+      # checkout must run as an explicit step BEFORE any `uses: ./.github/...`.
+      - uses: actions/checkout@v4
+
       - uses: ./.github/actions/workspace-setup
 
       - name: Build package
@@ -42,6 +46,8 @@ jobs:
       contents: read
       deployments: write
     steps:
+      - uses: actions/checkout@v4
+
       - uses: ./.github/actions/workspace-setup
 
       # Building the example IS the test: the astro build fetches the RSS feed
@@ -68,6 +74,8 @@ jobs:
     permissions:
       contents: read
     steps:
+      - uses: actions/checkout@v4
+
       - uses: ./.github/actions/workspace-setup
 
       # The prebuild fetches posts through the shared public proxy, then astro
@@ -88,11 +96,14 @@ jobs:
       pull-requests: write
       id-token: write
     steps:
-      - uses: ./.github/actions/workspace-setup
+      - uses: actions/checkout@v4
         with:
           # full history: changeset publish creates and pushes git tags,
           # and changelog-github links changesets to commits
-          fetch-depth: "0"
+          fetch-depth: 0
+
+      - uses: ./.github/actions/workspace-setup
+        with:
           registry-url: "https://registry.npmjs.org"
 
       - name: Build package
