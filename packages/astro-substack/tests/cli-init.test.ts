@@ -1,5 +1,6 @@
 /**
- * Tests for the `astro-substack init` bin.
+ * Tests for the `astro-substack init` and `astro-substack proxy` commands of
+ * the bin.
  *
  * Run: node --test tests/cli-init.test.ts
  */
@@ -161,6 +162,93 @@ test("init rejects unknown flags and invalid values", async () => {
     ]);
     assert.notEqual(badSort.status, 0, "invalid sort must exit non-zero");
     assert.ok(badSort.stderr.includes("--sort must be one of"));
+  } finally {
+    await rm(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("proxy scaffolds worker-proxy/ with the worker and wrangler config", async () => {
+  const tmpDir = await mkdtemp(join(tmpdir(), "astro-substack-proxy-"));
+
+  try {
+    const run = runInit(tmpDir, ["proxy"]);
+    assert.equal(run.status, 0, `proxy failed:\n${run.stderr}`);
+
+    const worker = await readFile(join(tmpDir, "worker-proxy", "worker.mjs"), "utf8");
+    assert.ok(worker.includes('const ALLOWED_SUFFIX = ".substack.com";'), "worker must restrict to *.substack.com");
+    assert.ok(worker.includes("export default"), "worker must export the fetch handler");
+
+    const wrangler = await readFile(join(tmpDir, "worker-proxy", "wrangler.jsonc"), "utf8");
+    assert.ok(wrangler.includes('"name": "astro-substack-proxy"'), "worker must be named astro-substack-proxy");
+    assert.ok(wrangler.includes('"main": "worker.mjs"'));
+
+    // The scaffolder prints the deploy path instead of deploying itself.
+    assert.ok(run.stdout.includes("npx wrangler deploy"));
+    assert.ok(run.stdout.includes("SUBSTACK_PROXY_URL="));
+  } finally {
+    await rm(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("proxy refuses to overwrite worker-proxy/ without --force", async () => {
+  const tmpDir = await mkdtemp(join(tmpdir(), "astro-substack-proxy-"));
+
+  try {
+    const first = runInit(tmpDir, ["proxy"]);
+    assert.equal(first.status, 0, `first proxy failed:\n${first.stderr}`);
+
+    const before = await readFile(join(tmpDir, "worker-proxy", "worker.mjs"), "utf8");
+    const second = runInit(tmpDir, ["proxy"]);
+    assert.notEqual(second.status, 0, "second proxy without --force must exit non-zero");
+    assert.ok(second.stderr.includes("already exists"), `unexpected stderr: ${second.stderr}`);
+
+    const after = await readFile(join(tmpDir, "worker-proxy", "worker.mjs"), "utf8");
+    assert.equal(after, before, "refused run must leave the file unchanged");
+  } finally {
+    await rm(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("proxy --force overwrites worker-proxy/", async () => {
+  const tmpDir = await mkdtemp(join(tmpdir(), "astro-substack-proxy-"));
+
+  try {
+    const first = runInit(tmpDir, ["proxy"]);
+    assert.equal(first.status, 0, `first proxy failed:\n${first.stderr}`);
+
+    const forced = runInit(tmpDir, ["proxy", "--force"]);
+    assert.equal(forced.status, 0, `forced proxy failed:\n${forced.stderr}`);
+
+    const worker = await readFile(join(tmpDir, "worker-proxy", "worker.mjs"), "utf8");
+    assert.ok(worker.includes("export default"), "file must be rewritten");
+  } finally {
+    await rm(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("proxy rejects init-only value flags", async () => {
+  const tmpDir = await mkdtemp(join(tmpdir(), "astro-substack-proxy-"));
+
+  try {
+    const run = runInit(tmpDir, ["proxy", "--publication", "https://x.substack.com/"]);
+    assert.notEqual(run.status, 0, "proxy with --publication must exit non-zero");
+    assert.ok(run.stderr.includes("not valid with the proxy command"));
+
+    const badLimit = runInit(tmpDir, ["proxy", "--limit", "5"]);
+    assert.notEqual(badLimit.status, 0, "proxy with --limit must exit non-zero");
+    assert.ok(badLimit.stderr.includes("not valid with the proxy command"));
+  } finally {
+    await rm(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("passing both init and proxy subcommands errors", async () => {
+  const tmpDir = await mkdtemp(join(tmpdir(), "astro-substack-proxy-"));
+
+  try {
+    const run = runInit(tmpDir, ["init", "proxy"]);
+    assert.notEqual(run.status, 0, "init + proxy must exit non-zero");
+    assert.ok(run.stderr.includes("either init or proxy"));
   } finally {
     await rm(tmpDir, { recursive: true, force: true });
   }

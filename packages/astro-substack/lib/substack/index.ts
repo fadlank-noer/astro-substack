@@ -1,98 +1,39 @@
-/**
- * Sorting options supported by the Substack archive endpoint.
- */
-export type SubstackSort = "new" | "top" | "pinned" | "community";
-
 import { errorMessage, mapPost, normalizeHandle } from "./helper.ts";
+import { findFeedItemContent, parseFeedItems } from "./feed.ts";
+import { BROWSER_USER_AGENT, PUBLIC_PROXY_BASE_URL } from "../../types/index.ts";
+import type {
+  FetchPublicationsOptions,
+  FeedSubstackPostContent,
+  StaticPostsData,
+  StaticPostsMetadata,
+  SubstackPublicationPost,
+} from "../../types/index.ts";
 import { join } from "node:path";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 
 /**
- * A public publication post as returned by `SubstackInitiator.fetchPublications()`.
+ * Proxy resolution shared by every fetchPublications():
+ *
+ * - `proxy: "public"` wins and routes through PUBLIC_PROXY_BASE_URL —
+ *   `proxyBaseUrl` is ignored in that mode.
+ * - `proxy: "own"` requires `proxyBaseUrl`; a missing URL fails loudly here
+ *   instead of silently sending an unproxied request that Cloudflare will
+ *   403 from CI.
+ * - Otherwise a directly-set `proxyBaseUrl` keeps its original meaning.
  */
-export interface SubstackPublicationPost {
-  /** Numeric post id from the Substack API. */
-  id: number;
-  /** Post title (plain text). */
-  title: string;
-  /** Post subtitle, or null when absent. */
-  subtitle: string | null;
-  /** URL slug, e.g. "are-you-tone-deaf-for-practicing". */
-  slug: string;
-  /** ISO 8601 publish timestamp, e.g. "2026-09-19T15:59:11.064Z". */
-  postDate: string;
-  /** Canonical URL of the post. */
-  canonicalUrl: string;
-  /** Cover image URL, or null when the post has no cover. */
-  coverImage: string | null;
-  /** Raw audience field from the API ("everyone", "paid", ...). */
-  audience: string;
-  /** True when the post is paywalled (audience "paid" or is_paid truthy). */
-  isPaywalled: boolean;
-  /** Raw post type from the API ("newsletter", "podcast", ...). */
-  type: string;
+function resolveProxyBaseUrl(options: FetchPublicationsOptions): string | undefined {
+  const { proxy, proxyBaseUrl } = options;
+  if (proxy === "public") return PUBLIC_PROXY_BASE_URL;
+  if (proxy === "own") {
+    if (!proxyBaseUrl) {
+      throw new RangeError(
+        'proxy: "own" requires proxyBaseUrl — set it to your own proxy URL, or use proxy: "public" for the shared one',
+      );
+    }
+    return proxyBaseUrl;
+  }
+  return proxyBaseUrl;
 }
-
-export interface FetchPublicationsOptions {
-  /**
-   * Maximum number of posts to request (1-50, server-side max).
-   * When omitted, the request omits the `limit` param and Substack returns
-   * ALL posts of the publication (verified live 2026-09-21).
-   * An invalid value (non-integer, < 1, or > 50) falls back to 50.
-   */
-  limit?: number;
-  /** Sort order of the archive. Default: "new". */
-  sort?: SubstackSort;
-  /** Request timeout in milliseconds. Default: 15000. */
-  timeoutMs?: number;
-  /**
-   * Base URL of a fetch proxy (see examples/worker-proxy) for environments
-   * where Substack's Cloudflare 403-challenges direct requests — GitHub
-   * Actions runners and other datacenter IPs (verified 2026-09-30: both the
-   * archive and the RSS feed are blocked there regardless of User-Agent,
-   * while the same requests pass from residential IPs). When set, the request
-   * goes to `<proxyBaseUrl>?url=<encoded archive URL>` and the proxy must
-   * return the upstream response verbatim.
-   */
-  proxyBaseUrl?: string;
-  /**
-   * Base delay between retries of retryable failures (HTTP 429/503 and
-   * network errors), multiplied by the attempt number: 10s, 20s, 30s, 40s by
-   * default (5 attempts, ~100s of total backoff). Substack rate-limits the
-   * shared proxy egress IPs, and those windows can outlast a few seconds —
-   * a build that waits them out succeeds instead of failing the whole deploy.
-   */
-  retryDelayMs?: number;
-}
-
-export interface StaticPostsMetadata {
-  /** Schema version — increment on breaking format changes. */
-  version: number;
-  /** Publication handle the posts were fetched from. Lets a page know the
-   *  source without reading env, which differs between Node and Vite. */
-  handle: string;
-  /** ISO 8601 timestamp when posts were fetched. */
-  fetchedAt: string;
-  /** Sort order used: "new", "top", "pinned", or "community". */
-  sort: string;
-  /** Requested limit (null = all posts). */
-  limit: number | null;
-}
-
-export interface StaticPostsData {
-  meta: StaticPostsMetadata;
-  posts: SubstackPublicationPost[];
-}
-
-/**
- * Substack serves /api/v1/archive behind Cloudflare, which 403s non-browser
- * clients when the request originates from a datacenter IP (seen 2026-09-30:
- * GitHub Actions runners got "HTTP 403 Forbidden" while the same request from
- * a residential IP passed). Sending a browser User-Agent satisfies the bot
- * rule; Node's own default UA (or none) does not.
- */
-const BROWSER_USER_AGENT =
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36";
 
 /**
  * Minimal, dependency-free client for reading PUBLIC Substack publications.
@@ -122,7 +63,7 @@ export class SubstackInitiator {
    * An invalid `limit` falls back to the server-side max of 50.
    */
   async fetchPublications(options: FetchPublicationsOptions = {}): Promise<SubstackPublicationPost[]> {
-    let { limit, sort = "new", timeoutMs = 15_000, proxyBaseUrl } = options;
+    let { limit, sort = "new", timeoutMs = 15_000 } = options;
 
     if (
       limit !== undefined &&
@@ -140,25 +81,53 @@ export class SubstackInitiator {
 
     // Through the proxy, the upstream URL travels as the `url` query param and
     // the proxy returns the upstream response verbatim.
+    const proxyBaseUrl = resolveProxyBaseUrl(options);
     const requestUrl: URL | string = proxyBaseUrl
       ? `${proxyBaseUrl}${proxyBaseUrl.includes("?") ? "&" : "?"}url=${encodeURIComponent(archiveUrl.toString())}`
       : archiveUrl;
 
     const { retryDelayMs = 10_000 } = options;
+    const response = await this.fetchWithRetry(
+      requestUrl,
+      {
+        Accept: "application/json",
+        "User-Agent": BROWSER_USER_AGENT,
+      },
+      { timeoutMs, retryDelayMs, label: "Substack archive", sourceUrl: archiveUrl },
+    );
+
+    const payload: unknown = await response.json();
+    if (!Array.isArray(payload)) {
+      throw new TypeError(
+        `Expected a JSON array from the Substack archive, got: ${typeof payload}`,
+      );
+    }
+
+    return payload.map(mapPost);
+  }
+
+  /**
+   * Issues `requestUrl` with `headers` and retries transient failures —
+   * network errors, HTTP 429 and HTTP 503 — across 5 attempts with linear
+   * backoff, honoring `Retry-After` when present: Substack rate-limits the
+   * shared proxy egress IPs, and a transient 429 must not fail an
+   * otherwise-green build. Throws when the request cannot be completed or
+   * the final response is an HTTP error.
+   */
+  protected async fetchWithRetry(
+    requestUrl: URL | string,
+    headers: Record<string, string>,
+    fetchOptions: { timeoutMs: number; retryDelayMs: number; label: string; sourceUrl: URL },
+  ): Promise<Response> {
+    const { timeoutMs, retryDelayMs, label, sourceUrl } = fetchOptions;
     const MAX_ATTEMPTS = 5;
 
-    // 429/503 and network errors are retried with linear backoff (honoring
-    // Retry-After when present): Substack rate-limits the shared proxy egress
-    // IPs, and a transient 429 must not fail an otherwise-green build.
     let response: Response | undefined;
     let lastCause: unknown;
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       try {
         response = await fetch(requestUrl, {
-          headers: {
-            Accept: "application/json",
-            "User-Agent": BROWSER_USER_AGENT,
-          },
+          headers,
           signal: AbortSignal.timeout(timeoutMs),
         });
       } catch (cause) {
@@ -177,25 +146,18 @@ export class SubstackInitiator {
 
     if (!response) {
       throw new Error(
-        `Failed to reach Substack archive at ${archiveUrl}: ${errorMessage(lastCause)}`,
+        `Failed to reach ${label} at ${sourceUrl}: ${errorMessage(lastCause)}`,
         { cause: lastCause },
       );
     }
 
     if (!response.ok) {
       throw new Error(
-        `Substack archive returned HTTP ${response.status} ${response.statusText} for ${archiveUrl}`,
+        `${label} returned HTTP ${response.status} ${response.statusText} for ${sourceUrl}`,
       );
     }
 
-    const payload: unknown = await response.json();
-    if (!Array.isArray(payload)) {
-      throw new TypeError(
-        `Expected a JSON array from the Substack archive, got: ${typeof payload}`,
-      );
-    }
-
-    return payload.map(mapPost);
+    return response;
   }
 }
 
@@ -224,10 +186,10 @@ export class StaticSubstackInitiator extends SubstackInitiator {
    */
   async saveStaticPosts(options: FetchPublicationsOptions = {}): Promise<void> {
     const posts = await this.fetchPublications(options);
-    
+
     const outputDir = join(this.dirPath, "__substack_rendered");
     await mkdir(outputDir, { recursive: true });
-    
+
     const payload = {
       version: 1,
       handle: this.handle,
@@ -236,7 +198,7 @@ export class StaticSubstackInitiator extends SubstackInitiator {
       limit: options.limit ?? null,
       posts,
     };
-    
+
     const outputPath = join(outputDir, "posts.json");
     const encoder = new TextEncoder();
     await writeFile(outputPath, encoder.encode(JSON.stringify(payload, null, 2)));
@@ -248,7 +210,7 @@ export class StaticSubstackInitiator extends SubstackInitiator {
    */
   async loadStaticPosts(): Promise<StaticPostsData> {
     const postsPath = join(this.dirPath, "__substack_rendered", "posts.json");
-    
+
     let raw: string;
     try {
       raw = await readFile(postsPath, { encoding: "utf-8" });
@@ -258,7 +220,7 @@ export class StaticSubstackInitiator extends SubstackInitiator {
         { cause },
       );
     }
-    
+
     let parsed: unknown;
     try {
       parsed = JSON.parse(raw);
@@ -268,7 +230,7 @@ export class StaticSubstackInitiator extends SubstackInitiator {
         { cause },
       );
     }
-    
+
     if (
       typeof parsed !== "object" ||
       parsed === null ||
@@ -279,16 +241,16 @@ export class StaticSubstackInitiator extends SubstackInitiator {
         `Invalid static posts format in ${postsPath}: expected { version, fetchedAt, sort, limit, posts } structure`,
       );
     }
-    
+
     const data = parsed as Record<string, unknown>;
-    
+
     const version = typeof data.version === "number" ? data.version : 1;
     if (version > 1) {
       throw new TypeError(
         `Unsupported static posts schema version: ${version}. Expected 1. Update astro-substack package.`,
       );
     }
-    
+
     return {
       meta: {
         version,
@@ -299,5 +261,86 @@ export class StaticSubstackInitiator extends SubstackInitiator {
       },
       posts: Array.isArray(data.posts) ? data.posts : [],
     };
+  }
+}
+
+/**
+ * Extended client that reads the publication's PUBLIC RSS feed
+ * (`{handle}/feed`) instead of the unofficial archive API, implemented on
+ * top of the same retry/proxy/User-Agent transport as the archive client.
+ *
+ * `fetchPublications()` returns the SAME lean shape as the archive client —
+ * the list carries no content. The feed's two extra fields (the FULL post
+ * body from `content:encoded` and the `dc:creator` byline) are fetched per
+ * post via `fetchPostContent()`. The feed exposes no numeric post id
+ * (`id` is always `0`; key on `canonicalUrl`/`slug`), audience/paywall, or
+ * post type (mapped to the archive mapper's defaults).
+ *
+ * The feed has no pagination or sort parameters and is a snapshot of recent
+ * posts only, never the full archive (verified 2026-09-30). `limit` is
+ * therefore applied client-side after parsing, and `sort` is accepted for
+ * signature compatibility but has no effect.
+ */
+export class FeedSubstackInitiator extends SubstackInitiator {
+  async fetchPublications(options: FetchPublicationsOptions = {}): Promise<SubstackPublicationPost[]> {
+    const { limit } = options;
+    const posts = parseFeedItems(await this.fetchFeedDocument(options));
+    if (limit !== undefined && Number.isInteger(limit) && limit >= 1) {
+      return posts.slice(0, limit);
+    }
+    return posts;
+  }
+
+  /**
+   * Fetch the FULL content of one post — exactly what the lean
+   * `fetchPublications()` list leaves out (bodyHtml, author).
+   *
+   * The feed is the only public source of full post bodies and RSS has no
+   * per-post endpoint, so this re-reads `{handle}/feed` through the same
+   * retry/proxy transport and matches the item on canonicalUrl or slug.
+   * Returns null when the feed holds no such post; `bodyHtml` is null when
+   * the item carries no `content:encoded`. Each call costs one feed fetch —
+   * cache the result when you need content for many posts.
+   *
+   * @param key the post's canonicalUrl, or just its slug.
+   */
+  async fetchPostContent(
+    key: string,
+    options: Pick<
+      FetchPublicationsOptions,
+      "proxy" | "proxyBaseUrl" | "retryDelayMs" | "timeoutMs"
+    > = {},
+  ): Promise<FeedSubstackPostContent | null> {
+    const xml = await this.fetchFeedDocument(options);
+    return findFeedItemContent(xml, key);
+  }
+
+  /** Fetches the raw feed XML through the shared retry/proxy transport. */
+  private async fetchFeedDocument(
+    options: Pick<
+      FetchPublicationsOptions,
+      "proxy" | "proxyBaseUrl" | "retryDelayMs" | "timeoutMs"
+    >,
+  ): Promise<string> {
+    const { timeoutMs = 15_000, retryDelayMs = 10_000 } = options;
+
+    const feedUrl = new URL("/feed", normalizeHandle(this.handle));
+
+    // Through the proxy, the upstream URL travels as the `url` query param and
+    // the proxy returns the upstream response verbatim.
+    const proxyBaseUrl = resolveProxyBaseUrl(options);
+    const requestUrl: URL | string = proxyBaseUrl
+      ? `${proxyBaseUrl}${proxyBaseUrl.includes("?") ? "&" : "?"}url=${encodeURIComponent(feedUrl.toString())}`
+      : feedUrl;
+
+    const response = await this.fetchWithRetry(
+      requestUrl,
+      {
+        Accept: "application/rss+xml, application/xml;q=0.9, text/xml;q=0.8, */*;q=0.7",
+        "User-Agent": BROWSER_USER_AGENT,
+      },
+      { timeoutMs, retryDelayMs, label: "Substack RSS feed", sourceUrl: feedUrl },
+    );
+    return response.text();
   }
 }

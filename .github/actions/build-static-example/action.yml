@@ -1,0 +1,34 @@
+name: "Build static example (proxy)"
+description: >-
+  Runs examples/static-shared-proxy's build (env-driven prebuild fetch + astro
+  build) through the given proxy — the end-to-end test of the static chain
+  with the shared public proxy. The runner IP is a datacenter IP, so direct
+  fetches would be Cloudflare-403-challenged.
+
+inputs:
+  proxy-url:
+    description: "Fetch proxy base URL (SUBSTACK_PROXY_URL)"
+    required: true
+  publication-url:
+    description: "Publication to fetch (SUBSTACK_PUBLICATION_URL; the prebuild fails fast without it)"
+    required: true
+  limit:
+    description: "Posts per build, 1-50"
+    required: false
+    default: "10"
+  sort:
+    description: "Archive sort: new | top | pinned | community"
+    required: false
+    default: "new"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Build static example (prebuild fetch + astro build)
+      shell: bash
+      run: pnpm --filter static-shared-proxy run build
+      env:
+        SUBSTACK_PROXY_URL: ${{ inputs.proxy-url }}
+        SUBSTACK_PUBLICATION_URL: ${{ inputs.publication-url }}
+        SUBSTACK_LIMIT: ${{ inputs.limit }}
+        SUBSTACK_SORT: ${{ inputs.sort }}

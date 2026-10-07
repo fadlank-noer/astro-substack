@@ -8,7 +8,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { SubstackInitiator, type SubstackPublicationPost } from "../lib/substack/index.ts";
+import { SubstackInitiator } from "../lib/substack/index.ts";
+import { PUBLIC_PROXY_BASE_URL, type SubstackPublicationPost } from "../types/index.ts";
 
 const PUBLICATION = "https://fadlansthought.substack.com/";
 
@@ -305,6 +306,56 @@ test("fetchPublications routes through proxyBaseUrl when set", async () => {
   );
 
   const expected = "https://proxy.example.workers.dev?url=" +
+    encodeURIComponent(
+      `${PUBLICATION}api/v1/archive?sort=top&offset=0&limit=10`,
+    );
+  assert.equal(requested, expected);
+});
+
+test("proxy: 'own' uses proxyBaseUrl", async () => {
+  let requested: URL | string | undefined;
+
+  await withFetchStub(
+    (url) => {
+      requested = url;
+      return Promise.resolve(jsonResponse([]));
+    },
+    async () => {
+      const client = new SubstackInitiator(PUBLICATION);
+      await client.fetchPublications({
+        proxy: "own",
+        proxyBaseUrl: "https://own.example.workers.dev",
+      });
+    },
+  );
+
+  assert.equal(
+    requested,
+    "https://own.example.workers.dev?url=" +
+      encodeURIComponent(`${PUBLICATION}api/v1/archive?sort=new&offset=0`),
+  );
+});
+
+test("proxy: 'own' without proxyBaseUrl fails loudly instead of sending an unproxied request", async () => {
+  const client = new SubstackInitiator(PUBLICATION);
+  await assert.rejects(client.fetchPublications({ proxy: "own" }), RangeError);
+});
+
+test("proxy: 'public' routes through the shared public proxy", async () => {
+  let requested: URL | string | undefined;
+
+  await withFetchStub(
+    (url) => {
+      requested = url;
+      return Promise.resolve(jsonResponse([]));
+    },
+    async () => {
+      const client = new SubstackInitiator(PUBLICATION);
+      await client.fetchPublications({ proxy: "public", limit: 10, sort: "top" });
+    },
+  );
+
+  const expected = PUBLIC_PROXY_BASE_URL + "?url=" +
     encodeURIComponent(
       `${PUBLICATION}api/v1/archive?sort=top&offset=0&limit=10`,
     );

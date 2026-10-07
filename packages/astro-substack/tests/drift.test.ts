@@ -1,6 +1,6 @@
 /**
  * Drift check (C3/R3): the CLI template is the canonical prebuild script; the
- * example's scripts/prebuild.mjs must stay textually identical to it. The
+ * examples' scripts/prebuild.mjs must stay textually identical to it. The
  * README/example/CLI already drifted once (the README documented save()/load()
  * methods that never existed) — this test makes that failure loud.
  *
@@ -15,23 +15,26 @@ import { fileURLToPath } from "node:url";
 import { TEMPLATE } from "../cli/init.mjs";
 
 const PACKAGE_DIR = dirname(dirname(fileURLToPath(import.meta.url)));
-const EXAMPLE_PREBUILD = join(
-  PACKAGE_DIR,
-  "..",
-  "..",
-  "examples",
-  "static",
-  "scripts",
-  "prebuild.mjs",
-);
+const EXAMPLES = ["static-shared-proxy", "static-own-proxy"];
 
-test("example prebuild.mjs is textually identical to the CLI template", async () => {
-  const example = await readFile(EXAMPLE_PREBUILD, "utf8");
-  assert.equal(
-    example,
-    TEMPLATE,
-    "examples/static/scripts/prebuild.mjs drifted from cli/init.mjs TEMPLATE — update both together",
-  );
+test("example prebuild.mjs files are textually identical to the CLI template", async () => {
+  for (const example of EXAMPLES) {
+    const prebuild = join(
+      PACKAGE_DIR,
+      "..",
+      "..",
+      "examples",
+      example,
+      "scripts",
+      "prebuild.mjs",
+    );
+    const content = await readFile(prebuild, "utf8");
+    assert.equal(
+      content,
+      TEMPLATE,
+      `examples/${example}/scripts/prebuild.mjs drifted from cli/init.mjs TEMPLATE — update both together`,
+    );
+  }
 });
 
 test("the canonical template carries the full env contract", () => {

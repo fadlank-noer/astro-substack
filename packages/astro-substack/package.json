@@ -1,7 +1,7 @@
 {
   "name": "astro-substack",
   "description": "Astro integration for Substack newsletter content.",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "type": "module",
   "repository": {
     "type": "git",
@@ -24,7 +24,8 @@
     "astro.d.ts",
     "cli",
     "index.ts",
-    "lib"
+    "lib",
+    "types"
   ],
   "exports": {
     ".": {
@@ -60,5 +61,8 @@
   "devDependencies": {
     "@types/node": "^22.20.4",
     "typescript": "^7.0.2"
+  },
+  "dependencies": {
+    "fast-xml-parser": "^5.11.2"
   }
 }

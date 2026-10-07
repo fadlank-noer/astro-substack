@@ -1,0 +1,24 @@
+name: "Deploy feed example"
+description: >-
+  Deploys the built examples/feed dist to Cloudflare Workers as a
+  static-assets site. Requires CLOUDFLARE_API_TOKEN (Workers Scripts:Edit)
+  and CLOUDFLARE_ACCOUNT_ID, passed as inputs — composite actions receive
+  secrets only through explicit inputs.
+
+inputs:
+  cloudflare-api-token:
+    description: "Cloudflare API token with Workers Scripts:Edit"
+    required: true
+  cloudflare-account-id:
+    description: "Cloudflare account id"
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+    - name: Deploy to Cloudflare Workers (static assets)
+      shell: bash
+      run: pnpm --filter feed exec wrangler deploy
+      env:
+        CLOUDFLARE_API_TOKEN: ${{ inputs.cloudflare-api-token }}
+        CLOUDFLARE_ACCOUNT_ID: ${{ inputs.cloudflare-account-id }}

@@ -3,7 +3,7 @@
 > [!WARNING]
 > **Experimental Package** — This package is under active development and may contain breaking changes between versions. Use at your own discretion in production projects.
 
-Fetch public posts from any Substack publication and use them in Astro — at build time, with zero runtime dependencies.
+Fetch public posts from any Substack publication and use them in Astro — at build time, with a single runtime dependency ([fast-xml-parser](https://www.npmjs.com/package/fast-xml-parser), used to parse the RSS feed).
 
 ## Install
 
@@ -47,7 +47,8 @@ const latest = await client.fetchPublications({
 | `limit`     | `number`                                            | —        | `1`-`50` (server-side max). **Omitted** = the `limit` param is not sent and Substack returns **all** posts. **Invalid** values (non-integer, `< 1`, `> 50`) fall back to `50`. |
 | `sort`      | `"new" \| "top" \| "pinned" \| "community"`         | `"new"`  | Archive sort order.                                                                                                                                       |
 | `timeoutMs` | `number`                                            | `15000`  | Request timeout via `AbortSignal.timeout`.                                                                                                                |
-| `proxyBaseUrl` | `string`                                         | —        | Route the request through a fetch proxy: `<proxyBaseUrl>?url=<encoded archive URL>`. Needed on datacenter IPs (GitHub Actions, most CI), where Substack's Cloudflare 403-challenges direct requests. See [CI / datacenter IPs](#ci--datacenter-ips). |
+| `proxy`     | `"own" \| "public"`                                 | —        | `"public"` = route through the shared public proxy (`https://astro-substack-proxy.fadlank.web.id`, zero setup). `"own"` = use `proxyBaseUrl` (required; missing URL throws a `RangeError`). See [CI / datacenter IPs](#ci--datacenter-ips). |
+| `proxyBaseUrl` | `string`                                         | —        | Your own fetch proxy: the request goes to `<proxyBaseUrl>?url=<encoded archive URL>`. Needed on datacenter IPs (GitHub Actions, most CI), where Substack's Cloudflare 403-challenges direct requests. Ignored when `proxy: "public"` is set. See [CI / datacenter IPs](#ci--datacenter-ips). |
 
 #### Return shape
 
@@ -92,6 +93,39 @@ const posts = await client.fetchPublications();
 > [!WARNING]
 > The Substack archive endpoint does **not** send `Access-Control-Allow-Origin`, so calling `fetchPublications()` from browser JavaScript on another domain will be blocked by CORS. Use it server-side (Astro frontmatter, endpoints, SSR) or behind a same-origin proxy.
 
+### `FeedSubstackInitiator`
+
+An alternative client that reads the publication's **public RSS feed** (`{handle}/feed`) instead of the archive API. Same `fetchPublications()` entry point and the **same lean return shape** as the archive client — the list carries no content. The feed's XML is parsed with [fast-xml-parser](https://www.npmjs.com/package/fast-xml-parser), the package's only runtime dependency.
+
+```ts
+import { FeedSubstackInitiator } from "astro-substack";
+
+const client = new FeedSubstackInitiator("https://fadlansthought.substack.com/");
+
+// 1. The lean list — same shape as SubstackInitiator.fetchPublications()
+const posts = await client.fetchPublications({ limit: 10 });
+
+// 2. Full content per post — a SEPARATE function. RSS has no per-post
+//    endpoint, so this re-reads the feed and matches on canonicalUrl/slug.
+const content = await client.fetchPostContent("are-you-tone-deaf-for-practicing");
+// content.bodyHtml — the FULL post body (from content:encoded)
+// content.author   — the byline (from dc:creator)
+```
+
+`fetchPostContent(key, options?)` returns a `FeedSubstackPostContent` (`title`, `postDate`, `canonicalUrl`, `slug`, `author`, `bodyHtml`) or `null` when the feed holds no such post. `key` is the post's `canonicalUrl` or just its `slug`. Each call costs one feed fetch — cache the result when you need content for many posts. `proxy`, `proxyBaseUrl`, `timeoutMs`, and `retryDelayMs` are honored (the proxy is required on CI).
+
+Differences of the LIST from `SubstackInitiator.fetchPublications()`:
+
+| Field / option | Feed behavior |
+| -------------- | ------------- |
+| `id`           | Always `0` — the feed exposes no numeric post id; the GUID is the post URL. Key on `canonicalUrl` / `slug`. |
+| `audience`, `isPaywalled`, `type` | Not exposed by the feed; defaults `"everyone"`, `false`, `"newsletter"`. |
+| `limit`        | Applied client-side after parsing (the feed has no pagination). Invalid values are ignored. |
+| `sort`         | Accepted for signature compatibility, no effect — the feed is always newest-first. |
+| Coverage       | The feed is a recent-posts **snapshot**, not the publication's full archive. |
+
+`timeoutMs`, `proxy`, `proxyBaseUrl`, and `retryDelayMs` behave exactly like the archive client — the feed is Cloudflare-fronted too (see [CI / datacenter IPs](#ci--datacenter-ips); `proxy: "public"` uses the shared proxy at `https://astro-substack-proxy.fadlank.web.id`).
+
 ## Static Build Mode
 
 For static site generation, use `StaticSubstackInitiator`, which extends `SubstackInitiator`
@@ -103,6 +137,9 @@ your project:
 ```sh
 npx astro-substack init --publication https://yourpub.substack.com/
 ```
+
+It can also scaffold your own fetch-proxy worker (`npx astro-substack proxy`) — see
+[Own proxy worker](#own-proxy-worker).
 
 This creates `scripts/prebuild.mjs` and prints the `package.json` script block to paste. The
 generated script reads its configuration from the environment — never hardcoded. To replace
@@ -121,21 +158,54 @@ Values come from the process environment, or from `.env` / `.env.local` via the 
 loader inside the script (process env wins). `.env` is not needed by Astro itself — only by the
 prebuild.
 
+### Own proxy worker
+
+The CLI can scaffold the bundled Cloudflare Worker into your project, so the fetch proxy is
+**yours** — useful when you build from a VPS or any datacenter IP and don't want to depend on the
+shared public proxy (its traffic is shared with every user of the package):
+
+```sh
+npx astro-substack proxy               # creates worker-proxy/worker.mjs + wrangler.jsonc
+cd worker-proxy && npx wrangler deploy # ships it; wrangler prints the URL
+```
+
+The worker only forwards `https://*.substack.com` URLs (not an open proxy). Point
+`SUBSTACK_PROXY_URL` — or the code option `proxy: "own"` + `proxyBaseUrl` — at the deployed URL.
+See `examples/static-own-proxy` for a full working setup, and `examples/static-shared-proxy` for
+the shared-proxy variant of the same example.
+
 ### CI / datacenter IPs
 
 Substack's Cloudflare 403-challenges requests from datacenter IPs — GitHub Actions runners, most
 CI — regardless of User-Agent, on both the archive endpoint and the RSS feed (verified 2026-09-30;
 the same requests pass from residential IPs). If your prebuild fails with
-`Substack archive returned HTTP 403`, route it through a fetch proxy: deploy the bundled
-Cloudflare Worker (`examples/worker-proxy`) and point `SUBSTACK_PROXY_URL` at it.
+`Substack archive returned HTTP 403`, route it through a fetch proxy. Two ways:
+
+**Public proxy (zero setup).** The package ships a shared public proxy, deployed from
+`examples/worker-proxy` at `https://astro-substack-proxy.fadlank.web.id`. In code, pass
+`proxy: "public"`; in the prebuild, point `SUBSTACK_PROXY_URL` at it:
 
 ```sh
-cd examples/worker-proxy && npx wrangler deploy
-# → https://astro-substack-archive-proxy.<your-subdomain>.workers.dev
+SUBSTACK_PROXY_URL=https://astro-substack-proxy.fadlank.web.id
 ```
 
+It only proxies `https://*.substack.com` URLs (not an open proxy), and it runs on a custom domain,
+so the `workers.dev` rate-limit caveat below does not apply to it. It is shared by everyone using
+this package, though — prefer your own worker for serious CI usage.
+
+**Own proxy.** Scaffold the worker into your project with the CLI, deploy it, and pass its URL —
+in code via `proxy: "own"` + `proxyBaseUrl`, or in the prebuild via `SUBSTACK_PROXY_URL`:
+
 ```sh
-SUBSTACK_PROXY_URL=https://astro-substack-archive-proxy.<your-subdomain>.workers.dev
+npx astro-substack proxy           # creates worker-proxy/worker.mjs + wrangler.jsonc
+cd worker-proxy && npx wrangler deploy
+# → https://astro-substack-proxy.<your-subdomain>.workers.dev
+```
+
+The same worker also ships as `examples/worker-proxy`.
+
+```sh
+SUBSTACK_PROXY_URL=https://astro-substack-proxy.<your-subdomain>.workers.dev
 ```
 
 The worker only proxies `https://*.substack.com` URLs, so it is not an open proxy. Publications
@@ -145,7 +215,7 @@ on custom domains are not proxied by the bundled worker.
 > and shared CI runner IPs (GitHub Actions) routinely exhaust that budget — the same worker URL
 > returned 200 from a residential IP and an instant 429 from a runner (verified 2026-09-30).
 > For CI, prefer serving the proxy from a `pages.dev` Pages Function instead — see the
-> `functions/` directory in `examples/static`.
+> `functions/` directory in `examples/static-shared-proxy`.
 
 ### Prebuild Script
 

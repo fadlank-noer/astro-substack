@@ -1,4 +1,4 @@
-import type { SubstackPublicationPost } from "./index.ts";
+import type { SubstackPublicationPost } from "../../types/index.ts";
 
 export function normalizeHandle(handle: string): string {
   const trimmed = handle.trim();

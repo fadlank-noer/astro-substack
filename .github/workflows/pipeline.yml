@@ -1,3 +1,10 @@
+# One pipeline, component stages. Every stage reuses the composite actions in
+# .github/actions/: checkout/setup → build-feed-example → build-static-example
+# → deploy-feed-example, ending in the npm release.
+#
+# Stage order: checkout+CI → test feed → test static with shared proxy → deploy npm.
+# The feed example's Cloudflare deploy runs on main only, folded into its test
+# stage (that stage IS the former feed-example-deploy.yml).
 name: Pipeline
 
 on:
@@ -12,23 +19,13 @@ concurrency:
 
 jobs:
   ci:
-    name: "Step 1 — CI (test + build)"
+    name: "Step 1 — Checkout + CI (test + build)"
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: pnpm/action-setup@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+      - uses: ./.github/actions/workspace-setup
 
       - name: Build package
         run: pnpm --filter astro-substack build
@@ -36,9 +33,53 @@ jobs:
       - name: Unit tests (includes real-install smoke test)
         run: pnpm test:unit
 
-  release:
-    name: "Step 2 — Release (publish npm + GitHub Release)"
+  feed:
+    name: "Step 2 — Test feed example"
     needs: ci
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      deployments: write
+    steps:
+      - uses: ./.github/actions/workspace-setup
+
+      # Building the example IS the test: the astro build fetches the RSS feed
+      # end-to-end through the shared public proxy (runner IPs are datacenter
+      # IPs, which Substack's Cloudflare 403-challenges on direct requests).
+      - uses: ./.github/actions/build-feed-example
+        with:
+          proxy-url: https://astro-substack-proxy.fadlank.web.id
+
+      # Former feed-example-deploy.yml: publish the freshly built site to
+      # Cloudflare on main; PRs only test the build.
+      - name: Deploy feed example to Cloudflare (main only)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: ./.github/actions/deploy-feed-example
+        with:
+          cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          cloudflare-account-id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+  static:
+    name: "Step 3 — Test static example (shared proxy)"
+    needs: feed
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: ./.github/actions/workspace-setup
+
+      # The prebuild fetches posts through the shared public proxy, then astro
+      # builds the static site from __substack_rendered/posts.json.
+      - uses: ./.github/actions/build-static-example
+        with:
+          proxy-url: https://astro-substack-proxy.fadlank.web.id
+          publication-url: https://fadlansthought.substack.com/
+
+  release:
+    name: "Step 4 — Deploy npm (publish + GitHub Release)"
+    needs: [ci, feed, static]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -47,22 +88,12 @@ jobs:
       pull-requests: write
       id-token: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: ./.github/actions/workspace-setup
         with:
           # full history: changeset publish creates and pushes git tags,
           # and changelog-github links changesets to commits
-          fetch-depth: 0
-
-      - uses: pnpm/action-setup@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
+          fetch-depth: "0"
           registry-url: "https://registry.npmjs.org"
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
 
       - name: Build package
         run: pnpm --filter astro-substack build

@@ -6,7 +6,9 @@
 //
 // Usage:  https://<worker>/?url=<url-encoded absolute URL on *.substack.com>
 // Contract: returns the upstream response verbatim (status + Content-Type),
-// which is what astro-substack's `proxyBaseUrl` option expects.
+// which is what astro-substack's `proxy`/`proxyBaseUrl` options expect.
+// The shared public instance of this worker runs at
+// https://astro-substack-proxy.fadlank.web.id (use `proxy: "public"`).
 //
 // Restricted to https://*.substack.com so it is not an open proxy.
 

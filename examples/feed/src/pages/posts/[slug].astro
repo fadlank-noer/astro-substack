@@ -1,0 +1,84 @@
+---
+// Example: per-post CONTENT fetch — a DIFFERENT function from the list.
+// fetchPostContent(key) re-reads {handle}/feed (RSS has no per-post endpoint,
+// so the feed is the only public full-body source) and matches the item on
+// canonicalUrl or slug. Each call costs one feed fetch — cache the result
+// when you need content for many posts.
+//
+// Static output: getStaticPaths() runs the LIST fetch once (lean), then this
+// page's frontmatter runs the CONTENT fetch per post at build time.
+import { FeedSubstackInitiator } from "astro-substack";
+import type { FeedSubstackPostContent } from "astro-substack";
+
+const handle =
+  import.meta.env.SUBSTACK_PUBLICATION_URL || "https://fadlansthought.substack.com/";
+
+const client = new FeedSubstackInitiator(handle);
+
+export async function getStaticPaths() {
+  // NOTE: self-contained on purpose — Astro compiles getStaticPaths into a
+  // separate chunk, so it cannot close over the frontmatter constants above.
+  const listHandle =
+    import.meta.env.SUBSTACK_PUBLICATION_URL || "https://fadlansthought.substack.com/";
+  // 1. The LIST fetch — lean, no content. proxyBaseUrl matters in CI:
+  //    datacenter runner IPs are Cloudflare-403-challenged on direct fetches.
+  const posts = await new FeedSubstackInitiator(listHandle).fetchPublications({
+    proxyBaseUrl: import.meta.env.SUBSTACK_PROXY_URL || undefined,
+  });
+  return posts
+    .filter((post) => post.slug !== "")
+    .map((post) => ({
+      params: { slug: post.slug },
+      props: { canonicalUrl: post.canonicalUrl },
+    }));
+}
+
+const { canonicalUrl } = Astro.props;
+// 2. The CONTENT fetch — the separate function: full bodyHtml + author.
+const content: FeedSubstackPostContent | null = await client.fetchPostContent(
+  canonicalUrl,
+  { proxyBaseUrl: import.meta.env.SUBSTACK_PROXY_URL || undefined },
+);
+---
+
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width" />
+    <title>{content?.title ?? "Post not in feed"}</title>
+  </head>
+  <body>
+    <p><a href="/">← all posts</a></p>
+    {content ? (
+      <article>
+        <h1>{content.title}</h1>
+        <p>
+          {content.author && <span>by {content.author} — </span>}
+          {content.postDate && (
+            <time datetime={content.postDate}>{new Date(content.postDate).toDateString()}</time>
+          )}
+        </p>
+        {content.bodyHtml ? <div set:html={content.bodyHtml} /> : <p><em>(no content in feed)</em></p>}
+      </article>
+    ) : (
+      <p>Post not found in the feed.</p>
+    )}
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        max-width: 720px;
+        margin: 0 auto;
+        padding: 2rem;
+        line-height: 1.6;
+      }
+      time {
+        color: #666;
+        font-size: 0.9rem;
+      }
+      article :global(img) {
+        max-width: 100%;
+        height: auto;
+      }
+    </style>
+  </body>
+</html>

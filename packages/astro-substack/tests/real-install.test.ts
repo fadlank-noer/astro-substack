@@ -13,13 +13,67 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtemp, readdir, rm, writeFile, mkdir } from "node:fs/promises";
+import {
+  mkdtemp,
+  readdir,
+  rm,
+  writeFile,
+  mkdir,
+  readFile,
+  stat,
+  cp,
+  realpath,
+} from "node:fs/promises";
 import { renameSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const PACKAGE_DIR = dirname(dirname(fileURLToPath(import.meta.url)));
+
+/**
+ * Copy the runtime dependency `name` (and its transitive runtime deps) into
+ * the consumer's node_modules, dereferencing the store symlinks pnpm uses —
+ * simulating what a package manager does for the tarball's dependencies
+ * while keeping this gate offline and deterministic. Deliberately stat-based:
+ * resolving by name can trip over dependencies whose `exports` map has no
+ * CJS entry, and the physical layout is all this simulation needs.
+ */
+async function seedDependency(
+  name: string,
+  fromDir: string,
+  modulesDir: string,
+  seen = new Set<string>(),
+): Promise<void> {
+  if (seen.has(name)) return;
+  seen.add(name);
+  // The dependency sits either in the seeding package's own node_modules
+  // (package-root layout) or beside it under the per-package node_modules of
+  // a pnpm store entry (…/.pnpm/<pkg>@<version>/node_modules/<dep>).
+  const candidates = [
+    join(fromDir, "node_modules", name),
+    join(dirname(fromDir), name),
+  ];
+  let depDir: string | undefined;
+  for (const candidate of candidates) {
+    try {
+      await stat(join(candidate, "package.json"));
+      depDir = await realpath(candidate);
+      break;
+    } catch {
+      // try the next layout
+    }
+  }
+  if (!depDir) {
+    throw new Error(`cannot locate dependency ${name} seeded from ${fromDir}`);
+  }
+  await mkdir(modulesDir, { recursive: true });
+  await cp(depDir, join(modulesDir, name), { recursive: true, dereference: true });
+  const manifest = JSON.parse(await readFile(join(depDir, "package.json"), "utf8"));
+  for (const dep of Object.keys(manifest.dependencies ?? {})) {
+    await seedDependency(dep, depDir, modulesDir, seen);
+  }
+}
 
 test("packed tarball imports from a real node_modules layout", { timeout: 120_000 }, async () => {
   const tmp = await mkdtemp(join(tmpdir(), "astro-substack-real-install-"));
@@ -53,6 +107,17 @@ test("packed tarball imports from a real node_modules layout", { timeout: 120_00
     });
     assert.equal(untar.status, 0, `tar extraction failed:\n${untar.stderr}`);
     renameSync(join(tmp, "package"), installed);
+
+    // 2.5 Seed the package's runtime dependencies beside it — the unpacked
+    //     tarball is the package alone, while a real install also places its
+    //     dependencies in node_modules (the package root imports
+    //     fast-xml-parser transitively via the feed module).
+    const manifest = JSON.parse(
+      await readFile(join(PACKAGE_DIR, "package.json"), "utf8"),
+    );
+    for (const name of Object.keys(manifest.dependencies ?? {})) {
+      await seedDependency(name, PACKAGE_DIR, modules);
+    }
 
     // 3. A consumer script imports the package root the way the README documents.
     const consumerScript = join(consumer, "prebuild.mjs");

@@ -12,6 +12,6 @@
     "noEmit": true,
     "types": ["node"]
   },
-  "include": ["index.ts", "lib/**/*.ts", "tests/**/*.ts"],
+  "include": ["index.ts", "types/**/*.ts", "lib/**/*.ts", "tests/**/*.ts"],
   "exclude": ["node_modules", "dist"]
 }

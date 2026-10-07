@@ -1,0 +1,26 @@
+name: "Build feed example"
+description: >-
+  Builds examples/feed — the astro build fetches the publication's public RSS
+  feed at build time, so this is the end-to-end test of the feed client.
+  Direct requests from CI runner IPs (datacenter) are Cloudflare-403-challenged,
+  so pass proxy-url (shared public proxy, or your own worker).
+
+inputs:
+  proxy-url:
+    description: "Fetch proxy base URL (SUBSTACK_PROXY_URL); empty = direct fetch"
+    required: false
+    default: ""
+  publication-url:
+    description: "Publication to fetch (SUBSTACK_PUBLICATION_URL); empty = example default"
+    required: false
+    default: ""
+
+runs:
+  using: "composite"
+  steps:
+    - name: Build feed example (RSS fetch at build time)
+      shell: bash
+      run: pnpm --filter feed build
+      env:
+        SUBSTACK_PROXY_URL: ${{ inputs.proxy-url }}
+        SUBSTACK_PUBLICATION_URL: ${{ inputs.publication-url }}

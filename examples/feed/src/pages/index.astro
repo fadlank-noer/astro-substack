@@ -1,0 +1,87 @@
+---
+// Example: FeedSubstackInitiator — the LIST page. fetchPublications() returns
+// the SAME lean shape as the archive client: title, subtitle, date, links —
+// NO content. Full post bodies are fetched separately, per post, by
+// fetchPostContent() in src/pages/posts/[slug].astro.
+//
+// Options exercised (see FeedSubstackInitiator in lib/substack/index.ts):
+//   limit        applied client-side — the feed has no pagination
+//   timeoutMs    per-attempt request timeout
+//   retryDelayMs base delay of the linear 429/503 backoff (5 attempts)
+//   proxyBaseUrl fetch proxy for CI/datacenter IPs (examples/worker-proxy)
+//   sort         accepted for signature compatibility, no effect
+import { FeedSubstackInitiator } from "astro-substack";
+
+// Defaults to the reference publication; `||` (not ??) so an EMPTY CI
+// variable still falls back to the default.
+const handle =
+  import.meta.env.SUBSTACK_PUBLICATION_URL || "https://fadlansthought.substack.com/";
+
+const client = new FeedSubstackInitiator(handle);
+
+const posts = await client.fetchPublications({
+  // The feed has no pagination param: after parsing, the newest `limit`
+  // items are kept. Invalid values are ignored (fetch everything).
+  limit: 10,
+  // Per-attempt timeout for the underlying fetch.
+  timeoutMs: 15_000,
+  // Linear backoff base between retries of HTTP 429/503 and network
+  // errors — 5 attempts max: 10s, 20s, 30s, 40s before the build fails.
+  retryDelayMs: 10_000,
+  // Undefined locally (direct request). In CI set SUBSTACK_PROXY_URL —
+  // e.g. the shared public proxy (astro-substack-proxy.fadlank.web.id, also
+  // available as proxy: "public") or your own from examples/worker-proxy —
+  // because direct feed requests from datacenter IPs are Cloudflare-403'd
+  // regardless of User-Agent.
+  proxyBaseUrl: import.meta.env.SUBSTACK_PROXY_URL || undefined,
+  // sort: "new", // accepted for signature compatibility, no effect on the feed
+});
+---
+
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width" />
+    <title>astro-substack — feed example (list)</title>
+  </head>
+  <body>
+    <p>
+      Source: {handle} via <code>/feed</code> (RSS), showing {posts.length} posts.
+      This page fetches the LIST only — every title links to a detail page that
+      fetches its full content separately via <code>fetchPostContent()</code>.
+    </p>
+    <ul>
+      {posts.map((post) => (
+        <li>
+          <a href={`/posts/${post.slug}/`}>{post.title}</a>
+          {post.postDate && (
+            <time datetime={post.postDate}>{new Date(post.postDate).toDateString()}</time>
+          )}
+          {post.subtitle && <p><em>{post.subtitle}</em></p>}
+        </li>
+      ))}
+    </ul>
+    <style>
+      ul {
+        list-style: none;
+        padding: 0;
+      }
+      li {
+        margin-bottom: 1.5rem;
+      }
+      a {
+        font-weight: 600;
+        color: #1a1a2e;
+        text-decoration: none;
+      }
+      a:hover {
+        text-decoration: underline;
+      }
+      time {
+        display: block;
+        color: #666;
+        font-size: 0.85rem;
+      }
+    </style>
+  </body>
+</html>

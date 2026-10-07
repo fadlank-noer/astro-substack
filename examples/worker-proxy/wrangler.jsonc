@@ -1,9 +1,12 @@
 {
   "$schema": "https://unpkg.com/wrangler/config-schema.json",
-  "name": "astro-substack-archive-proxy",
+  "name": "astro-substack-proxy",
   "main": "worker.mjs",
   "compatibility_date": "2026-08-24",
   "workers_dev": true,
+  "routes": [
+    { "pattern": "astro-substack-proxy.fadlank.web.id", "custom_domain": true }
+  ],
   "observability": {
     "enabled": true
   }

@@ -1,5 +1,5 @@
 {
-  "name": "static-example",
+  "name": "static-own-proxy",
   "type": "module",
   "version": "0.0.1",
   "private": true,
@@ -9,11 +9,11 @@
     "prebuild": "node scripts/prebuild.mjs",
     "preview": "astro preview"
   },
+  "volta": {
+    "extends": "../../package.json"
+  },
   "dependencies": {
     "astro": "^7.3.3",
     "astro-substack": "workspace:*"
-  },
-  "volta": {
-    "extends": "../../package.json"
   }
 }

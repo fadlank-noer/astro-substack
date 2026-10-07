@@ -1,5 +1,15 @@
 # astro-substack
 
+## 0.3.0
+
+### Minor Changes
+
+- Add `FeedSubstackInitiator`, a client that fetches posts from a publication's public RSS feed (`{handle}/feed`). `fetchPublications()` returns the same lean shape as the archive client; full post bodies (`content:encoded`) and author bylines are fetched per post with the separate `fetchPostContent()` function. The feed's XML is parsed with `fast-xml-parser`, which becomes the package's first runtime dependency. Shared types and constants now live in the package's `types/` module — all existing import paths from the package root keep working.
+
+- Add an `astro-substack proxy` CLI command that scaffolds a deployable Cloudflare Worker fetch proxy (`worker-proxy/worker.mjs` + `wrangler.jsonc`) into the user's project — the same worker as `examples/worker-proxy`, restricted to `https://*.substack.com` URLs.
+
+- Add a `proxy` option to `fetchPublications()`: `"public"` routes requests through the shared public proxy at `https://astro-substack-proxy.fadlank.web.id` (deployed from `examples/worker-proxy`), `"own"` uses your own `proxyBaseUrl` (a missing URL now fails loudly instead of sending an unproxied request). Setting `proxyBaseUrl` alone keeps working.
+
 ## 0.2.1
 
 ### Patch Changes

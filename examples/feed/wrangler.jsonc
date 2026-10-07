@@ -1,0 +1,10 @@
+{
+  "$schema": "https://unpkg.com/wrangler/config-schema.json",
+  "name": "astro-substack-feed-example",
+  "compatibility_date": "2026-08-24",
+  // Static-assets Worker: no server-side code runs after the build — the RSS
+  // fetch happens at BUILD time (Astro frontmatter), visitors get plain HTML.
+  "assets": {
+    "directory": "./dist"
+  }
+}
