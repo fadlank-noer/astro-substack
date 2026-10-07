@@ -24,6 +24,12 @@ inputs:
 runs:
   using: "composite"
   steps:
+    # The example imports "astro-substack", which resolves to the package's
+    # dist/ — a fresh CI checkout does not have it yet.
+    - name: Build the astro-substack package
+      shell: bash
+      run: pnpm --filter astro-substack build
+
     - name: Build static example (prebuild fetch + astro build)
       shell: bash
       run: pnpm --filter static-shared-proxy run build
