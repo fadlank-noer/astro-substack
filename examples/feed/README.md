@@ -75,7 +75,7 @@ touching the package or the example. Two things to know about fetching from CI:
 2. **The real CI problem is the Cloudflare 403 challenge, not CORS.** Substack's
    Cloudflare challenges direct requests from datacenter IPs — GitHub Actions runners get
    HTTP 403 on both the archive and the RSS feed regardless of User-Agent (verified
-   2026-09-30 in `archive-probe.yml`). The workflow therefore sets:
+   2026-09-30 by a runner probe). The workflow therefore sets:
 
    ```yaml
    SUBSTACK_PROXY_URL: https://astro-substack-proxy.fadlank.web.id   # shared public proxy
