@@ -1,5 +1,11 @@
 # astro-substack
 
+## 0.3.1
+
+### Patch Changes
+
+- Documentation revamp: the README now opens with a "3 paths · 1 library" journey graphic and restructures usage around the three initiators — `SubstackInitiator` (SSR · live fetch), `FeedSubstackInitiator` (RSS · full body HTML), and `StaticSubstackInitiator` (build-time · posts.json). The duplicated proxy/CI guidance is merged into a single Proxy section and the options tables now include `retryDelayMs`. No API changes.
+
 ## 0.3.0
 
 ### Minor Changes
