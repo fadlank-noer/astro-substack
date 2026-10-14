@@ -1,11 +1,11 @@
 <div align="center">
-  <img src="../../assets/logo.png" alt="Astro Substack logo" width="180" />
+  <img src="https://raw.githubusercontent.com/fadlank-noer/astro-substack/039685fb14bdc1703b9872f675461503dceb6ed8/assets/logo.png" alt="Astro Substack logo" width="180" />
   <h1>Astro Substack</h1>
   <p><strong>3 paths · 1 library</strong> — fetch public posts from any Substack publication in Astro.</p>
 </div>
 
 <div align="center">
-  <img src="../../assets/lib-journey.png" alt="Astro Substack journey: SubstackInitiator (SSR · live fetch), FeedSubstackInitiator (RSS · full body HTML), StaticSubstackInitiator (Build-time · posts.json)" width="880" />
+  <img src="https://github.com/fadlank-noer/astro-substack/blob/039685fb14bdc1703b9872f675461503dceb6ed8/assets/lib-journey.png?raw=true" alt="Astro Substack journey: SubstackInitiator (SSR · live fetch), FeedSubstackInitiator (RSS · full body HTML), StaticSubstackInitiator (Build-time · posts.json)" width="880" />
 </div>
 
 > [!WARNING]
