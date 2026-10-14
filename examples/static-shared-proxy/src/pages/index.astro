@@ -17,9 +17,13 @@ const { meta, posts }: StaticPostsData = await client.loadStaticPosts();
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width" />
     <title>Substack Static Example</title>
+    <link rel="icon" type="image/png" href="/logo.png" />
   </head>
   <body>
-    <h1>Substack Posts (Static Build)</h1>
+    <header class="site-header">
+      <img src="/logo.png" alt="Astro Substack logo" width="120" height="150" />
+      <h1>Substack Posts (Static Build)</h1>
+    </header>
     
     <section class="meta">
       <p>Publication: {meta.handle}</p>
@@ -47,6 +51,19 @@ const { meta, posts }: StaticPostsData = await client.loadStaticPosts();
         max-width: 800px;
         margin: 0 auto;
         padding: 2rem;
+      }
+      .site-header {
+        text-align: center;
+        margin-bottom: 2rem;
+      }
+      .site-header img {
+        display: block;
+        width: 120px;
+        height: auto;
+        margin: 0 auto 0.75rem;
+      }
+      .site-header h1 {
+        margin: 0;
       }
       .meta {
         background: #f0f0f0;
