@@ -91,7 +91,7 @@ jobs:
     # The feed/static example smoke tests hit live Substack through the shared
     # public proxy and routinely 429 from runner IPs — they must not block the
     # release. CI (unit tests + package build) remains the only gate.
-    if: !cancelled() && needs.ci.result == 'success' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: "!cancelled() && needs.ci.result == 'success' && github.event_name == 'push' && github.ref == 'refs/heads/main'"
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
