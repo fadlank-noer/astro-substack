@@ -1,5 +1,19 @@
 # astro-substack
 
+## 0.4.0
+
+### Minor Changes
+
+- Add `SubstackInitiator.fetchPostContent(key, options?)`: fetch the FULL body of one post from the publication's public `{handle}/api/v1/posts/{slug}` endpoint. Keyed on canonicalUrl or slug; returns `null` on HTTP 404; honors the same `proxy`/`proxyBaseUrl`/`timeoutMs`/`retryDelayMs` options as the list fetch. Returns the new `SubstackPostContent` type (title, subtitle, postDate, canonicalUrl, slug, author, coverImage, audience, isPaywalled, type, bodyHtml).
+
+- Add static article support to `StaticSubstackInitiator`: `saveStaticArticles()` fetches every post listed in the just-written `posts.json` (ONE list snapshot — no re-fetch) into versioned `__substack_rendered/articles/<slug>.json` envelopes, sequentially with a 300 ms pause (shared-proxy rate limits); `loadStaticArticle(slug)` reads one back loudly on missing/malformed files. A `content` of `null` is valid (post 404'd mid-save). Unsafe slugs (empty, contains `/`, starts with `.`) are skipped.
+
+- Add `StaticSubstackInitiator.saveAll()`: the chained fetch — list fetched ONCE into `posts.json`, then every post's full body into `articles/`, in one call. The scaffolded prebuild now uses it by default; set `SUBSTACK_FETCH_CONTENT=0` to skip the content fan-out while iterating on layout.
+
+- `FeedSubstackPostContent` now extends `SubstackPostContent` (both content fetchers share one shape); the feed mapper additionally returns `coverImage` (from the item enclosure) and the archive-mapper defaults for `audience`/`isPaywalled`/`type`.
+
+- `fetchWithRetry` gains an internal `allowNotFound` flag so 404s can be returned instead of thrown. The `ssr`, `static-own-proxy`, and `static-shared-proxy` examples gained content detail pages (with a "Paid subscribers only — teaser" badge for paywalled posts), internal list links, and the README documents both new APIs (including the `set:html` no-sanitizer trust note).
+
 ## 0.3.1
 
 ### Patch Changes
