@@ -1,0 +1,78 @@
+---
+// Detail page: one statically-rendered article from
+// __substack_rendered/articles/<slug>.json — written by scripts/prebuild.mjs
+// (saveStaticArticles). No network at build time here: slugs come from
+// posts.json (loadStaticPosts) and the body from loadStaticArticle.
+// A file whose content is null (the post 404'd mid-save) renders as
+// "(no content)" instead of failing the build.
+import { StaticSubstackInitiator } from "astro-substack";
+
+// Use process.cwd() — Astro dev/build always run with cwd = project root
+const projectRoot = process.cwd();
+
+export async function getStaticPaths() {
+  // NOTE: self-contained on purpose — Astro compiles getStaticPaths into a
+  // separate chunk, so it cannot close over the frontmatter constants above.
+  const client = new StaticSubstackInitiator("unused-at-build-time", process.cwd());
+  const { posts } = await client.loadStaticPosts();
+  // Same guard as saveStaticArticles: skipped slugs have no article file.
+  return posts
+    .filter((post) => post.slug && !post.slug.includes("/") && !post.slug.startsWith("."))
+    .map((post) => ({
+      params: { slug: post.slug },
+    }));
+}
+
+const { slug } = Astro.params;
+const client = new StaticSubstackInitiator("unused-at-build-time", projectRoot);
+const article = await client.loadStaticArticle(slug);
+const content = article.content;
+---
+
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width" />
+    <title>{content?.title ?? "Post not found"}</title>
+  </head>
+  <body>
+    <p><a href="/">← all posts</a></p>
+    <article>
+      <h2>{content?.title ?? slug}</h2>
+      <p>
+        {content?.author && <span>by {content.author} — </span>}
+        {content?.postDate && (
+          <time datetime={content.postDate}>{new Date(content.postDate).toDateString()}</time>
+        )}
+      </p>
+      {content?.isPaywalled && (
+        <p class="paywall-badge">🔒 Paid subscribers only — teaser</p>
+      )}
+      {content?.bodyHtml ? <div set:html={content.bodyHtml} /> : <p><em>(no content)</em></p>}
+    </article>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        max-width: 800px;
+        margin: 0 auto;
+        padding: 2rem;
+        line-height: 1.6;
+      }
+      time {
+        color: #666;
+        font-size: 0.9rem;
+      }
+      .paywall-badge {
+        background: #fff7e0;
+        border: 1px solid #e6c96a;
+        border-radius: 6px;
+        padding: 0.5rem 0.75rem;
+        font-weight: 600;
+      }
+      article :global(img) {
+        max-width: 100%;
+        height: auto;
+      }
+    </style>
+  </body>
+</html>

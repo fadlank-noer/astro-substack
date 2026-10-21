@@ -157,6 +157,10 @@ export function findFeedItemContent(
     canonicalUrl: item.canonicalUrl,
     slug: item.slug,
     author: item.author,
+    coverImage: item.coverImage,
+    audience: item.audience,
+    isPaywalled: item.isPaywalled,
+    type: item.type,
     bodyHtml: item.bodyHtml,
   };
 }

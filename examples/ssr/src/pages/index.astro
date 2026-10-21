@@ -1,5 +1,8 @@
 ---
-import { Hello } from 'astro-substack'
+// Landing page for the ssr example. The <Hello /> demo component is NOT used
+// here: the package root intentionally never re-exports it (a Node-runtime
+// entry must never resolve a .astro file), and the `astro-substack/astro`
+// subpath export is a packaging demo, not needed to demonstrate the client.
 ---
 
 <html lang="en">
@@ -9,6 +12,7 @@ import { Hello } from 'astro-substack'
   <title>Test Pkg</title>
 </head>
 <body>
-  <Hello />
+  <h1>Test Pkg</h1>
+  <p><a href="/posts/">See the posts list →</a></p>
 </body>
 </html>

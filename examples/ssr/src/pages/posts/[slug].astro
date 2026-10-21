@@ -1,0 +1,89 @@
+---
+// Example: per-post CONTENT fetch via SubstackInitiator — a DIFFERENT function
+// from the list. fetchPostContent(key) hits the publication's public
+// `{handle}/api/v1/posts/{slug}` endpoint (key = slug or canonicalUrl) and
+// returns the full body_html; null when the post does not exist.
+//
+// This example has no astro.config.mjs, so this page is rendered STATICALLY
+// at build time: getStaticPaths() runs the LIST fetch once, then this page's
+// frontmatter runs the CONTENT fetch per post. SubstackInitiator is the same
+// client you'd call per-request in a real SSR setup (output: "server" + an
+// adapter — an optional follow-up); only the moment of the call differs.
+import { SubstackInitiator } from "astro-substack";
+import type { SubstackPostContent } from "astro-substack";
+
+const handle =
+  import.meta.env.SUBSTACK_PUBLICATION_URL || "https://fadlansthought.substack.com/";
+
+const client = new SubstackInitiator(handle);
+
+export async function getStaticPaths() {
+  // NOTE: self-contained on purpose — Astro compiles getStaticPaths into a
+  // separate chunk, so it cannot close over the frontmatter constants above.
+  const listHandle =
+    import.meta.env.SUBSTACK_PUBLICATION_URL || "https://fadlansthought.substack.com/";
+  // 1. The LIST fetch — lean, no content. Options MUST stay identical to the
+  //    frontmatter of src/pages/posts.astro: a different limit/sort/proxy
+  //    would create links to routes that are never generated (grill B5).
+  //    proxyBaseUrl matters in CI: datacenter runner IPs are
+  //    Cloudflare-403-challenged on direct fetches.
+  const posts = await new SubstackInitiator(listHandle).fetchPublications({
+    limit: 20,
+    proxyBaseUrl: import.meta.env.SUBSTACK_PROXY_URL || undefined,
+  });
+  return posts
+    .filter((post) => post.slug !== "")
+    .map((post) => ({
+      params: { slug: post.slug },
+    }));
+}
+
+const { slug } = Astro.params;
+// 2. The CONTENT fetch — the separate function: full bodyHtml + author.
+const content: SubstackPostContent | null = await client.fetchPostContent(slug, {
+  proxyBaseUrl: import.meta.env.SUBSTACK_PROXY_URL || undefined,
+});
+---
+
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width" />
+    <title>{content?.title ?? "Post not found"}</title>
+  </head>
+  <body>
+    <p><a href="/posts/">← all posts</a></p>
+    {content ? (
+      <article>
+        <h1>{content.title}</h1>
+        <p>
+          {content.author && <span>by {content.author} — </span>}
+          {content.postDate && (
+            <time datetime={content.postDate}>{new Date(content.postDate).toDateString()}</time>
+          )}
+          {content.isPaywalled && <strong> — paywalled</strong>}
+        </p>
+        {content.bodyHtml ? <div set:html={content.bodyHtml} /> : <p><em>(no content)</em></p>}
+      </article>
+    ) : (
+      <p>Post not found.</p>
+    )}
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        max-width: 720px;
+        margin: 0 auto;
+        padding: 2rem;
+        line-height: 1.6;
+      }
+      time {
+        color: #666;
+        font-size: 0.9rem;
+      }
+      article :global(img) {
+        max-width: 100%;
+        height: auto;
+      }
+    </style>
+  </body>
+</html>

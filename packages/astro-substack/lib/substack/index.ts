@@ -1,15 +1,23 @@
-import { errorMessage, mapPost, normalizeHandle } from "./helper.ts";
+import {
+  errorMessage,
+  extractSlug,
+  mapPost,
+  mapPostContent,
+  normalizeHandle,
+} from "./helper.ts";
 import { findFeedItemContent, parseFeedItems } from "./feed.ts";
 import { BROWSER_USER_AGENT, PUBLIC_PROXY_BASE_URL } from "../../types/index.ts";
 import type {
   FetchPublicationsOptions,
   FeedSubstackPostContent,
+  StaticArticleData,
   StaticPostsData,
   StaticPostsMetadata,
+  SubstackPostContent,
   SubstackPublicationPost,
 } from "../../types/index.ts";
 import { join } from "node:path";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 
 /**
  * Proxy resolution shared by every fetchPublications():
@@ -107,6 +115,69 @@ export class SubstackInitiator {
   }
 
   /**
+   * Fetch the FULL content of one post — the body the lean
+   * `fetchPublications()` list leaves out — from the publication's public
+   * `{handle}/api/v1/posts/{slug}` endpoint (verified public, no auth,
+   * returns top-level post object with `body_html`).
+   *
+   * Keyed on slug or canonicalUrl (same semantics as
+   * FeedSubstackInitiator.fetchPostContent), because the global
+   * `substack.com/posts/by-id/{id}` endpoint is not proxyable (the worker
+   * only forwards `*.substack.com`). Returns null when the publication has
+   * no such post (HTTP 404). Honors proxy/retry/timeout options — the
+   * endpoint sits behind the same Cloudflare rules as /api/v1/archive.
+   *
+   * @param key the post's canonicalUrl, or just its slug.
+   */
+  async fetchPostContent(
+    key: string,
+    options: Pick<
+      FetchPublicationsOptions,
+      "proxy" | "proxyBaseUrl" | "retryDelayMs" | "timeoutMs"
+    > = {},
+  ): Promise<SubstackPostContent | null> {
+    const { timeoutMs = 15_000, retryDelayMs = 10_000 } = options;
+    const slug = extractSlug(key);
+    if (!slug) return null;
+
+    const contentUrl = new URL(
+      `/api/v1/posts/${encodeURIComponent(slug)}`,
+      normalizeHandle(this.handle),
+    );
+
+    const proxyBaseUrl = resolveProxyBaseUrl(options);
+    const requestUrl: URL | string = proxyBaseUrl
+      ? `${proxyBaseUrl}${proxyBaseUrl.includes("?") ? "&" : "?"}url=${encodeURIComponent(contentUrl.toString())}`
+      : contentUrl;
+
+    const response = await this.fetchWithRetry(
+      requestUrl,
+      { Accept: "application/json", "User-Agent": BROWSER_USER_AGENT },
+      {
+        timeoutMs,
+        retryDelayMs,
+        label: "Substack post content",
+        sourceUrl: contentUrl,
+        allowNotFound: true,
+      },
+    );
+    if (response.status === 404) return null;
+
+    let payload: unknown;
+    try {
+      payload = await response.json();
+    } catch (cause) {
+      throw new TypeError(
+        `Expected JSON from ${contentUrl} — got a non-JSON body (Cloudflare challenge?): ${errorMessage(cause)}`,
+      );
+    }
+    if (payload === null || typeof payload !== "object" || !("slug" in payload)) {
+      throw new TypeError(`Unexpected content payload from ${contentUrl}`);
+    }
+    return mapPostContent(payload);
+  }
+
+  /**
    * Issues `requestUrl` with `headers` and retries transient failures —
    * network errors, HTTP 429 and HTTP 503 — across 5 attempts with linear
    * backoff, honoring `Retry-After` when present: Substack rate-limits the
@@ -117,7 +188,14 @@ export class SubstackInitiator {
   protected async fetchWithRetry(
     requestUrl: URL | string,
     headers: Record<string, string>,
-    fetchOptions: { timeoutMs: number; retryDelayMs: number; label: string; sourceUrl: URL },
+    fetchOptions: {
+      timeoutMs: number;
+      retryDelayMs: number;
+      label: string;
+      sourceUrl: URL;
+      /** When true, an HTTP 404 response is returned instead of thrown. */
+      allowNotFound?: boolean;
+    },
   ): Promise<Response> {
     const { timeoutMs, retryDelayMs, label, sourceUrl } = fetchOptions;
     const MAX_ATTEMPTS = 5;
@@ -151,7 +229,7 @@ export class SubstackInitiator {
       );
     }
 
-    if (!response.ok) {
+    if (!response.ok && !(fetchOptions.allowNotFound && response.status === 404)) {
       throw new Error(
         `${label} returned HTTP ${response.status} ${response.statusText} for ${sourceUrl}`,
       );
@@ -162,14 +240,17 @@ export class SubstackInitiator {
 }
 
 /**
- * Extended client for static builds that saves fetched posts to a local JSON file.
- * Use this for prebuild scripts — call `save()` before reading with `load()`.
+ * Extended client for static builds that saves fetched posts to
+ * `__substack_rendered/posts.json` and their full bodies to
+ * `__substack_rendered/articles/<slug>.json`.
+ * Use this for prebuild scripts: `saveStaticPosts()` before building, or
+ * `saveAll()` for the chained list+content fetch in ONE call.
  *
  * @example
  * ```typescript
  * const client = new StaticSubstackInitiator("https://yourpub.substack.com/", "/path/to/project");
- * await client.save({ limit: 20, sort: "new" });
- * const { meta, posts } = await client.load();
+ * await client.saveAll({ limit: 20, sort: "new" }); // posts.json + articles/
+ * const { meta, posts } = await client.loadStaticPosts();
  * ```
  */
 export class StaticSubstackInitiator extends SubstackInitiator {
@@ -178,6 +259,21 @@ export class StaticSubstackInitiator extends SubstackInitiator {
   constructor(handle: string, dirPath: string) {
     super(handle);
     this.dirPath = dirPath;
+  }
+
+  /**
+   * THE chained fetch: `saveStaticPosts()` + `saveStaticArticles()` in one
+   * call — fetches the post list ONCE into `__substack_rendered/posts.json`,
+   * then (reading back that same posts.json as the slug list, so list and
+   * articles come from ONE snapshot) fetches every post's full content into
+   * `__substack_rendered/articles/<slug>.json` with the sequential 300 ms
+   * pacing. Wrap it in `SUBSTACK_FETCH_CONTENT !== "0"` when you want the
+   * content fan-out skippable from the environment.
+   */
+  async saveAll(options: FetchPublicationsOptions = {}): Promise<void> {
+    await this.saveStaticPosts(options);
+    // Reads the posts.json saveStaticPosts just wrote — never re-fetches the list (A1).
+    await this.saveStaticArticles(options);
   }
 
   /**
@@ -261,6 +357,111 @@ export class StaticSubstackInitiator extends SubstackInitiator {
       },
       posts: Array.isArray(data.posts) ? data.posts : [],
     };
+  }
+
+  /**
+   * Reads the post LIST from the posts.json just written by saveStaticPosts()
+   * (MUST run in the same prebuild — keeps articles/ and posts.json derived
+   * from ONE list snapshot; re-fetching would risk divergence and one extra
+   * rate-limited request), then fetches each post's content from
+   * `{handle}/api/v1/posts/{slug}` SEQUENTIALLY with a small pause between
+   * requests (shared-proxy rate limits — back-to-back requests would
+   * 429-storm the retry ladder) and writes one
+   * `__substack_rendered/articles/<slug>.json` per post.
+   *
+   * The articles directory is wiped BEFORE fetching — same fail-fast rule as
+   * scripts/prebuild.mjs for posts.json: a failed build must not leave stale
+   * articles that a later build would silently serve. Content is fetched only
+   * for the posts posts.json carries (limit/sort were already applied there —
+   * they are ignored here). Slugs that are empty, contain "/", or start with
+   * "." are skipped (they cannot become safe filenames).
+   */
+  async saveStaticArticles(options: FetchPublicationsOptions = {}): Promise<void> {
+    const { posts } = await this.loadStaticPosts();
+
+    const articlesDir = join(this.dirPath, "__substack_rendered", "articles");
+    await rm(articlesDir, { recursive: true, force: true });
+    await mkdir(articlesDir, { recursive: true });
+
+    const fetchedAt = new Date().toISOString(); // one timestamp per run
+    const encoder = new TextEncoder();
+    let firstFetch = true;
+    for (const post of posts) {
+      if (!post.slug || post.slug.includes("/") || post.slug.startsWith(".")) {
+        continue; // "" happens; "/" or "."-prefixed slugs are unsafe filenames
+      }
+      if (!firstFetch) await new Promise((resolve) => setTimeout(resolve, 300));
+      firstFetch = false;
+      const content = await this.fetchPostContent(post.slug, options); // 404 → null
+      const payload: StaticArticleData = {
+        version: 1,
+        handle: this.handle,
+        fetchedAt,
+        slug: post.slug,
+        content,
+      };
+      const filePath = join(articlesDir, `${post.slug}.json`);
+      await writeFile(filePath, encoder.encode(JSON.stringify(payload, null, 2)));
+    }
+  }
+
+  /**
+   * Loads one statically-rendered article from
+   * `__substack_rendered/articles/<slug>.json`. Use in .astro frontmatter for
+   * detail pages; enumerate slugs from `loadStaticPosts()`.
+   * Throws when the file is missing/malformed — a missing file means
+   * `saveStaticArticles()` never ran, and failing loudly beats a blank page.
+   * A `content` of null is VALID (the post 404'd mid-save) — validity is
+   * checked by key presence, not truthiness.
+   */
+  async loadStaticArticle(slug: string): Promise<StaticArticleData> {
+    const articlePath = join(
+      this.dirPath,
+      "__substack_rendered",
+      "articles",
+      `${slug}.json`,
+    );
+
+    let raw: string;
+    try {
+      raw = await readFile(articlePath, { encoding: "utf-8" });
+    } catch (cause) {
+      throw new Error(
+        `Failed to read static article from ${articlePath}: ${errorMessage(cause)}`,
+        { cause },
+      );
+    }
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (cause) {
+      throw new Error(
+        `Malformed JSON in ${articlePath}: ${errorMessage(cause)}`,
+        { cause },
+      );
+    }
+
+    if (
+      typeof parsed !== "object" ||
+      parsed === null ||
+      !("content" in parsed)
+    ) {
+      throw new TypeError(
+        `Invalid static article format in ${articlePath}: expected { version, handle, fetchedAt, slug, content } structure`,
+      );
+    }
+
+    const data = parsed as Record<string, unknown>;
+
+    const version = typeof data.version === "number" ? data.version : 1;
+    if (version > 1) {
+      throw new TypeError(
+        `Unsupported static article schema version: ${version}. Expected 1. Update astro-substack package.`,
+      );
+    }
+
+    return parsed as StaticArticleData;
   }
 }
 

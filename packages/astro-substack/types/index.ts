@@ -40,21 +40,43 @@ export interface SubstackPublicationPost {
  * feed via `FeedSubstackInitiator.fetchPostContent()`. The lean
  * `fetchPublications()` list deliberately carries none of this — bodies are
  * fetched per post, separately.
+ *
+ * Extends SubstackPostContent so both content fetchers share one shape (the
+ * archive client's `fetchPostContent` lives on the shared base class): the
+ * feed's `coverImage` comes from the item enclosure, while
+ * audience/isPaywalled/type mirror the archive mapper's defaults — the feed
+ * exposes none of them.
  */
-export interface FeedSubstackPostContent {
+export interface FeedSubstackPostContent extends SubstackPostContent {}
+
+/**
+ * The full content of ONE post, fetched from the publication's public
+ * `{handle}/api/v1/posts/{slug}` endpoint via
+ * `SubstackInitiator.fetchPostContent()`. Same lean-per-list philosophy as
+ * FeedSubstackPostContent — the list carries no body; content is per-post.
+ */
+export interface SubstackPostContent {
   /** Post title (plain text). */
   title: string;
   /** Post subtitle, or null when absent. */
   subtitle: string | null;
-  /** ISO 8601 publish timestamp, or "" when the feed's date is unparseable. */
+  /** ISO 8601 publish timestamp from `post_date`. */
   postDate: string;
-  /** Canonical URL of the post (the identity used to match the feed item). */
+  /** Canonical URL of the post. */
   canonicalUrl: string;
-  /** URL slug, e.g. "are-you-tone-deaf-for-practicing". */
+  /** URL slug — the identity used for the request. */
   slug: string;
-  /** Post author from `<dc:creator>`, or null when the feed omits it. */
+  /** Author display name from `publishedBylines[0].name`, or null. */
   author: string | null;
-  /** Full post body HTML from `<content:encoded>`, or null when absent. */
+  /** Cover image URL, or null. */
+  coverImage: string | null;
+  /** Raw audience field ("everyone", "paid", ...). */
+  audience: string;
+  /** True when the post is paywalled (audience "paid"). */
+  isPaywalled: boolean;
+  /** Raw post type ("newsletter", "podcast", ...). */
+  type: string;
+  /** Full post body HTML from `body_html`, or null when absent. */
   bodyHtml: string | null;
 }
 
@@ -121,6 +143,25 @@ export interface StaticPostsMetadata {
 export interface StaticPostsData {
   meta: StaticPostsMetadata;
   posts: SubstackPublicationPost[];
+}
+
+/**
+ * One statically-rendered article file:
+ * `__substack_rendered/articles/<slug>.json`.
+ * RESOLVED D1 (2026-10-21): object (bukan array) — envelope versi mengikuti
+ * posts.json; konten memakai SubstackPostContent.
+ */
+export interface StaticArticleData {
+  /** Schema version — increment on breaking format changes. */
+  version: number;
+  /** Publication handle the article was fetched from. */
+  handle: string;
+  /** ISO 8601 timestamp when the article was fetched. */
+  fetchedAt: string;
+  /** Slug this file belongs to. */
+  slug: string;
+  /** Full post content; null when Substack answered 404 mid-save. */
+  content: SubstackPostContent | null;
 }
 
 /**

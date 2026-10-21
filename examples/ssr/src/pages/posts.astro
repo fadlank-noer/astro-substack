@@ -1,8 +1,24 @@
 ---
+// Example: SubstackInitiator — the LIST page. fetchPublications() returns the
+// lean archive shape: title, subtitle, date, links — NO body. The full body of
+// each post is fetched separately via fetchPostContent() in
+// src/pages/posts/[slug].astro.
+//
+// This example has no astro.config.mjs, so Astro renders it STATICALLY at
+// build time. SubstackInitiator is the same client you would call
+// per-request in a real SSR setup (output: "server" + an adapter) — only the
+// moment of the call differs.
 import { SubstackInitiator } from 'astro-substack';
 
 const client = new SubstackInitiator('https://fadlansthought.substack.com/');
-const posts = await client.fetchPublications();
+const posts = await client.fetchPublications({
+  // MUST stay identical to getStaticPaths() in src/pages/posts/[slug].astro —
+  // a different limit/sort/proxy there would create links to routes that are
+  // never generated (grill B5).
+  limit: 20,
+  proxyBaseUrl: import.meta.env.SUBSTACK_PROXY_URL || undefined,
+});
+const linkablePosts = posts.filter((post) => post.slug !== '');
 ---
 
 <html lang="en">
@@ -13,11 +29,11 @@ const posts = await client.fetchPublications();
   </head>
   <body>
     <h1>Publications</h1>
-    <p>{posts.length} post(s) fetched live from Substack at build time.</p>
-    {posts.map((post) => (
+    <p>{linkablePosts.length} post(s) fetched live from Substack at build time. Every title links to a detail page that fetches its full content.</p>
+    {linkablePosts.map((post) => (
       <article>
         <h2>
-          <a href={post.canonicalUrl}>{post.title}</a>
+          <a href={`/posts/${post.slug}/`}>{post.title}</a>
         </h2>
         {post.subtitle && <p>{post.subtitle}</p>}
         {post.coverImage && (

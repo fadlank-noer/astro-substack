@@ -76,12 +76,18 @@ const { StaticSubstackInitiator } = await import("astro-substack");
 console.log(`Fetching Substack posts for static build (${handle}, sort=${sort})...`);
 
 try {
-  await new StaticSubstackInitiator(handle, projectRoot).saveStaticPosts({
-    limit,
-    sort,
-    proxyBaseUrl,
-  });
-  console.log("✓ Static posts saved to __substack_rendered/posts.json");
+  const client = new StaticSubstackInitiator(handle, projectRoot);
+  if (process.env.SUBSTACK_FETCH_CONTENT === "0") {
+    await client.saveStaticPosts({ limit, sort, proxyBaseUrl });
+    console.log("✓ Static posts saved to __substack_rendered/posts.json");
+  } else {
+    // Chained default (D4 ON): the list is fetched ONCE into posts.json, then
+    // every post's full body into articles/ — sequential with 300 ms pacing
+    // inside saveAll, from ONE list snapshot (A1). A failure here exits 1 so
+    // `prebuild && astro build` never renders against half-fetched data (A2).
+    await client.saveAll({ limit, sort, proxyBaseUrl });
+    console.log("✓ Static posts + articles saved to __substack_rendered/");
+  }
 } catch (error) {
   console.error("✗ Failed to fetch static posts:", error.message);
   process.exit(1);

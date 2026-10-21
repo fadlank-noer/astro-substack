@@ -8,8 +8,10 @@ export {
 export type {
   FetchPublicationsOptions,
   FeedSubstackPostContent,
+  StaticArticleData,
   StaticPostsData,
   StaticPostsMetadata,
+  SubstackPostContent,
   SubstackPublicationPost,
   SubstackSort,
 } from "./types/index.ts";

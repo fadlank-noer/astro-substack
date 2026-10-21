@@ -36,7 +36,7 @@ const { meta, posts }: StaticPostsData = await client.loadStaticPosts();
     <ul class="posts">
       {posts.map((post) => (
         <li>
-          <a href={post.canonicalUrl}>{post.title}</a>
+          <a href={`/posts/${post.slug}/`}>{post.title}</a>
           <time datetime={post.postDate}>
             {new Date(post.postDate).toLocaleDateString()}
           </time>

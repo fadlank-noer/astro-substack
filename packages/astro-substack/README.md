@@ -60,6 +60,40 @@ Options:
 
 Each post returns `id`, `title`, `subtitle`, `slug`, `postDate`, `canonicalUrl`, `coverImage`, `audience`, `isPaywalled`, `type` — **metadata only**.
 
+### Full post body — `fetchPostContent(key, options?)`
+
+The list carries no bodies. Fetch one post's full content from the publication's public `{handle}/api/v1/posts/{slug}` endpoint (no auth; verified to return the top-level post object with `body_html` and to pass through the proxy):
+
+```ts
+import { SubstackInitiator } from "astro-substack";
+
+const client = new SubstackInitiator("https://yourpub.substack.com/");
+
+// key = the post's canonicalUrl or just its slug
+const post = await client.fetchPostContent("are-you-tone-deaf-for-practicing");
+// → SubstackPostContent | null
+//   { title, subtitle, postDate, canonicalUrl, slug, author, coverImage,
+//     audience, isPaywalled, type, bodyHtml }
+```
+
+- Returns `null` on HTTP 404 (no such post); honors the same `proxy` / `proxyBaseUrl` / `timeoutMs` / `retryDelayMs` options as the list — **a proxy is required on CI**, the endpoint sits behind the same Cloudflare rules as the archive.
+- `bodyHtml` is raw first-party HTML. Rendering it with Astro's `set:html` bypasses sanitizers **by design** — only point this client at publications you trust.
+- Each call is one request; fan out sequentially if you fetch many posts (the shared proxy rate-limits bursts).
+
+```astro
+---
+import { SubstackInitiator } from "astro-substack";
+
+const content = await new SubstackInitiator("https://yourpub.substack.com/")
+  .fetchPostContent(Astro.params.slug, { proxyBaseUrl: import.meta.env.SUBSTACK_PROXY_URL });
+---
+<article>
+  <h1>{content.title}</h1>
+  {content.isPaywalled && <p>🔒 Paid subscribers only — teaser</p>}
+  {content.bodyHtml ? <div set:html={content.bodyHtml} /> : <p><em>(no content)</em></p>}
+</article>
+```
+
 ## Path 2 — `FeedSubstackInitiator()` · RSS · full body HTML
 
 Reads the public RSS feed (`{handle}/feed`) — the only path with **full post bodies**.
@@ -107,6 +141,7 @@ Configuration via env (or `.env` / `.env.local` — process env wins):
 | `SUBSTACK_LIMIT`           | no       | `1`–`50`, out-of-range clamps to `50`                           |
 | `SUBSTACK_SORT`            | no       | `"new"` (default) \| `"top"` \| `"pinned"` \| `"community"`      |
 | `SUBSTACK_PROXY_URL`       | no       | Proxy base URL for CI — see [Proxy](#proxy)                     |
+| `SUBSTACK_FETCH_CONTENT`   | no       | Set `0` to skip the per-post body fan-out (default: fetch)      |
 
 The prebuild writes `__substack_rendered/posts.json` (add it to `.gitignore`). Pages read it back with `loadStaticPosts()` — the handle is stored in `meta.handle`, so pages need **no env access**. A failed fetch never leaves stale posts behind: the old file is removed before fetching.
 
@@ -121,12 +156,58 @@ const { meta, posts } = await new StaticSubstackInitiator("unused", process.cwd(
 <ul>
   {posts.map((post) => (
     <li>
-      <a href={post.canonicalUrl}>{post.title}</a>
+      <a href={`/posts/${post.slug}/`}>{post.title}</a>
       <time datetime={post.postDate}>{new Date(post.postDate).toDateString()}</time>
     </li>
   ))}
 </ul>
 ```
+
+### Full post bodies — `saveAll()` / `saveStaticArticles()` / `loadStaticArticle()`
+
+The scaffolded prebuild calls `saveAll()` — the chained fetch: the post list is fetched **once** into `__substack_rendered/posts.json`, then every post's **full body** goes into one file per post, `__substack_rendered/articles/<slug>.json` (add the folder to `.gitignore`). Calling `saveStaticPosts()` + `saveStaticArticles()` yourself chains identically — the article pass reads the posts.json just written, so list and bodies always come from ONE snapshot. Requests go out sequentially with a 300 ms pause (the shared proxy rate-limits bursts); set `SUBSTACK_FETCH_CONTENT=0` to skip the fan-out while iterating on layout.
+
+Each file is a versioned envelope:
+
+```json
+{
+  "version": 1,
+  "handle": "https://yourpub.substack.com/",
+  "fetchedAt": "2026-10-21T08:00:59.145Z",
+  "slug": "are-you-tone-deaf-for-practicing",
+  "content": { "title": "…", "bodyHtml": "<p>…</p>", "isPaywalled": false, "…": "…" }
+}
+```
+
+A `content` of `null` is valid — it means Substack answered 404 for that slug mid-save; the file still loads. The articles directory is wiped before every run, so a failed build never leaves stale bodies behind. Detail pages enumerate slugs from `loadStaticPosts()` and read the body with `loadStaticArticle()`:
+
+```astro
+---
+// src/pages/posts/[slug].astro
+import { StaticSubstackInitiator } from "astro-substack";
+
+export async function getStaticPaths() {
+  // self-contained — Astro compiles getStaticPaths as a separate chunk
+  const client = new StaticSubstackInitiator("unused", process.cwd());
+  const { posts } = await client.loadStaticPosts();
+  return posts
+    .filter((post) => post.slug && !post.slug.includes("/") && !post.slug.startsWith("."))
+    .map((post) => ({ params: { slug: post.slug } }));
+}
+
+const { slug } = Astro.params;
+const article = await new StaticSubstackInitiator("unused", process.cwd()).loadStaticArticle(slug);
+const content = article.content;
+---
+
+<article>
+  <h1>{content?.title ?? slug}</h1>
+  {content?.isPaywalled && <p>🔒 Paid subscribers only — teaser</p>}
+  {content?.bodyHtml ? <div set:html={content.bodyHtml} /> : <p><em>(no content)</em></p>}
+</article>
+```
+
+`loadStaticArticle()` throws when the file is missing or malformed — a missing file means the prebuild never ran, and failing loudly beats a blank page. As with the archive client, `set:html` renders first-party HTML without sanitizing: trust the publication.
 
 ---
 
