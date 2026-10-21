@@ -11,7 +11,7 @@
 </div>
 
 <div align="center">
-  <img src="https://raw.githubusercontent.com/fadlank-noer/astro-substack/039685fb14bdc1703b9872f675461503dceb6ed8/assets/logo.png" alt="Astro Substack logo" width="180" />
+  <img src="https://raw.githubusercontent.com/fadlank-noer/astro-substack/5c5e3f536cae063832b0f7cf9af14f91d2d7edeb/assets/logo.png" alt="Astro Substack logo" width="180" />
   <h1>Astro Substack</h1>
   <p><strong>3 paths · 1 library</strong> — fetch public posts from any Substack publication in Astro.</p>
 </div>
