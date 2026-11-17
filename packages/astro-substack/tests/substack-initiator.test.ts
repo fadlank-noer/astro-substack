@@ -72,7 +72,11 @@ test("fetchPublications omits the limit param when not set (returns all posts)",
   assert.equal(requested.origin, "https://fadlansthought.substack.com");
   assert.equal(requested.pathname, "/api/v1/archive");
   assert.equal(requested.searchParams.get("sort"), "new");
-  assert.equal(requested.searchParams.get("offset"), "0");
+  assert.equal(
+    requested.searchParams.get("offset"),
+    null,
+    "offset param must be absent — Substack's archive API rejects it",
+  );
   assert.equal(
     requested.searchParams.get("limit"),
     null,
@@ -245,11 +249,24 @@ test("fetchPublications keeps failing after exhausting retries", async () => {
   assert.equal(calls, 5);
 });
 
-test("fetchPublications throws when the payload is not an array", async () => {
+test("fetchPublications unwraps the { posts } wrapper (new API shape)", async () => {
   const client = new SubstackInitiator(PUBLICATION);
 
   await withFetchStub(
-    () => Promise.resolve(jsonResponse({ posts: [] })),
+    () => Promise.resolve(jsonResponse({ posts: [SAMPLE_POST], nextCursor: "abc" })),
+    async () => {
+      const posts = await client.fetchPublications();
+      assert.equal(posts.length, 1);
+      assert.equal(posts[0].slug, SAMPLE_POST.slug);
+    },
+  );
+});
+
+test("fetchPublications throws when the payload is neither an array nor { posts }", async () => {
+  const client = new SubstackInitiator(PUBLICATION);
+
+  await withFetchStub(
+    () => Promise.resolve(jsonResponse({ unexpected: true })),
     async () => {
       await assert.rejects(client.fetchPublications(), TypeError);
     },
@@ -307,7 +324,7 @@ test("fetchPublications routes through proxyBaseUrl when set", async () => {
 
   const expected = "https://proxy.example.workers.dev?url=" +
     encodeURIComponent(
-      `${PUBLICATION}api/v1/archive?sort=top&offset=0&limit=10`,
+      `${PUBLICATION}api/v1/archive?sort=top&limit=10`,
     );
   assert.equal(requested, expected);
 });
@@ -332,7 +349,7 @@ test("proxy: 'own' uses proxyBaseUrl", async () => {
   assert.equal(
     requested,
     "https://own.example.workers.dev?url=" +
-      encodeURIComponent(`${PUBLICATION}api/v1/archive?sort=new&offset=0`),
+      encodeURIComponent(`${PUBLICATION}api/v1/archive?sort=new`),
   );
 });
 
@@ -357,7 +374,7 @@ test("proxy: 'public' routes through the shared public proxy", async () => {
 
   const expected = PUBLIC_PROXY_BASE_URL + "?url=" +
     encodeURIComponent(
-      `${PUBLICATION}api/v1/archive?sort=top&offset=0&limit=10`,
+      `${PUBLICATION}api/v1/archive?sort=top&limit=10`,
     );
   assert.equal(requested, expected);
 });

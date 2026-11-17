@@ -64,11 +64,14 @@ export class SubstackInitiator {
 
   /**
    * Fetch the public posts of the publication from the unofficial archive
-   * endpoint: `{handle}/api/v1/archive?sort=<sort>&offset=0&limit=<limit>`.
+   * endpoint: `{handle}/api/v1/archive?sort=<sort>&limit=<limit>`.
    *
    * The `limit` param (1-50, server-side max) is only sent when set via
    * options; without it Substack returns every post of the publication.
    * An invalid `limit` falls back to the server-side max of 50.
+   *
+   * The old `offset` param is no longer sent — the API rejects it with
+   * `Invalid value` (verified 2026-11-17); pagination moved to `nextCursor`.
    */
   async fetchPublications(options: FetchPublicationsOptions = {}): Promise<SubstackPublicationPost[]> {
     let { limit, sort = "new", timeoutMs = 15_000 } = options;
@@ -82,7 +85,6 @@ export class SubstackInitiator {
 
     const archiveUrl = new URL("/api/v1/archive", normalizeHandle(this.handle));
     archiveUrl.searchParams.set("sort", sort);
-    archiveUrl.searchParams.set("offset", "0");
     if (limit !== undefined) {
       archiveUrl.searchParams.set("limit", String(limit));
     }
@@ -105,13 +107,23 @@ export class SubstackInitiator {
     );
 
     const payload: unknown = await response.json();
-    if (!Array.isArray(payload)) {
+    // Since 2026-11 the archive endpoint wraps the list in an object —
+    // `{ posts: [...], nextCursor }` — and rejects the old `offset` param.
+    // Earlier snapshots returned a bare array, so accept both shapes.
+    const entries: unknown[] | null =
+      Array.isArray(payload)
+        ? payload
+        : typeof payload === "object" && payload !== null &&
+            Array.isArray((payload as { posts?: unknown }).posts)
+          ? (payload as { posts: unknown[] }).posts
+          : null;
+    if (!entries) {
       throw new TypeError(
-        `Expected a JSON array from the Substack archive, got: ${typeof payload}`,
+        `Expected a JSON array or { posts: [...] } from the Substack archive, got: ${typeof payload}`,
       );
     }
 
-    return payload.map(mapPost);
+    return entries.map(mapPost);
   }
 
   /**
